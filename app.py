@@ -15,7 +15,7 @@ CORS(app) # Habilita CORS para todas as rotas por padrão
 # ATENÇÃO: Verifique se esta URL está CORRETA para o seu repositório.
 # Ela deve apontar para o arquivo 'precos.csv' dentro do seu repositório 'meu_comparador'
 # na branch 'main', na pasta 'frontend/public'.
-URL_CSV_GITHUB = "https://github.com/JVv-dev/meu_comparador/blob/main/frontend/public/precos.csv"
+URL_CSV_GITHUB = "https://raw.githubusercontent.com/JVv-dev/meu_comparador/main/frontend/public/precos.csv"
 
 # Variável global para armazenar os dados (cache)
 DADOS_CACHE = None
