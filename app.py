@@ -14,7 +14,7 @@ app = Flask(__name__)
 CORS(app)
 
 # --- URL RAW DO SEU CSV NO GITHUB ---
-URL_CSV_GITHUB = "https://raw.githubusercontent.com/JVv-dev/meu_comparador/main/frontend/public/precos.csv"
+URL_CSV_GITHUB = "https://raw.githubusercontent.com/JVv-dev/meu_comparador_backend/master/precos.csv"
 
 DADOS_CACHE = None
 
