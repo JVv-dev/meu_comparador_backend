@@ -33,9 +33,9 @@ LISTA_DE_PRODUTOS = [
     },
 ]
 
-#ARQUIVO_CSV = "precos.csv"
+ARQUIVO_CSV = "precos.csv"
 # Verifique se este é o caminho correto no seu PC
-ARQUIVO_CSV = r"C:\Users\joaov\OneDrive\Documentos\meu_comparador\frontend\public\precos.csv"
+#ARQUIVO_CSV = r"C:\Users\joaov\OneDrive\Documentos\meu_comparador\frontend\public\precos.csv"
 
 # --- HEADERS (Para Kabum e Selenium) ---
 HEADERS = {
