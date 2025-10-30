@@ -1,4 +1,4 @@
-# meu_comparador_backend/scraper.py (v9.3 - Anti-Bot com WebDriverWait)
+# meu_comparador_backend/scraper.py (v9.4 - Anti-Bot com Selenium-Stealth)
 
 import requests
 from bs4 import BeautifulSoup
@@ -14,11 +14,13 @@ from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.options import Options
-# --- NOVOS IMPORTS (Paciência Inteligente) ---
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
+
+# --- NOVO IMPORT DE CAMUFLAGEM ---
+from selenium_stealth import stealth
 
 # --- Imports para o Banco de Dados ---
 from sqlalchemy import create_engine
@@ -63,7 +65,7 @@ chrome_options.add_argument("--disable-gpu")
 chrome_options.add_argument("window-size=1920x1080")
 chrome_options.add_argument("--no-sandbox") 
 chrome_options.add_argument("--disable-dev-shm-usage")
-# --- NOVAS OPÇÕES DE CAMUFLAGEM ---
+# Opções de camuflagem padrão
 chrome_options.add_argument("--disable-blink-features=AutomationControlled")
 chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
 chrome_options.add_experimental_option('useAutomationExtension', False)
@@ -72,9 +74,19 @@ chrome_options.add_experimental_option('useAutomationExtension', False)
 try:
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=chrome_options)
-    # Camuflagem extra
-    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-    print("Navegador Selenium iniciado com sucesso.")
+    
+    # --- APLICAÇÃO DO SELENIUM-STEALTH ---
+    stealth(driver,
+            languages=["pt-BR", "pt"],
+            vendor="Google Inc.",
+            platform="Win32",
+            webgl_vendor="Intel Inc.",
+            renderer="Intel Iris OpenGL Engine",
+            fix_hairline=True,
+            )
+    # --- FIM DA CAMUFLAGEM ---
+
+    print("Navegador Selenium (com stealth) iniciado com sucesso.")
 except Exception as e:
     print(f"ERRO: Falha ao iniciar o Selenium/WebDriver.")
     print(f"Verifique sua conexão ou instalação do Chrome. Erro: {e}")
@@ -136,29 +148,24 @@ def buscar_dados_pichau(driver, url):
     nome_produto, preco_produto, imagem_url = None, None, None
     try:
         driver.get(url)
-        # Espera Inteligente de até 20 segundos
         wait = WebDriverWait(driver, 20)
         
-        # Espera o NOME aparecer
         tag_nome = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "h1.mui-1ri6pu6-product_info_title")))
         nome_produto = tag_nome.text.strip()
 
-        # Tenta encontrar o PREÇO
         try:
             tag_preco = driver.find_element(By.CSS_SELECTOR, "div.mui-1jk88bq-price_vista-extraSpacePriceVista")
             preco_produto = limpar_preco(tag_preco.text)
             print(f"  -> [Pichau] Status: Disponível! Preço: R$ {preco_produto}")
         except NoSuchElementException:
-            # Se o preço não existe, procura por "esgotado"
             try:
                 driver.find_element(By.CSS_SELECTOR, "span.mui-1nlpwp-availability-outOfStock")
                 print("  -> [Pichau] Status: Produto Esgotado")
                 preco_produto = 0.0
             except NoSuchElementException:
                 print("  -> [Pichau] ALERTA: Preço/Esgotado não encontrado.")
-                preco_produto = None # Falha em pegar o preço
+                preco_produto = None
 
-        # Tenta encontrar a IMAGEM
         try:
             tag_imagem = driver.find_element(By.CSS_SELECTOR, "img.iiz__img")
             imagem_url = tag_imagem.get_attribute('src')
@@ -179,29 +186,24 @@ def buscar_dados_terabyte(driver, url):
     nome_produto, preco_produto, imagem_url = None, None, None
     try:
         driver.get(url)
-        # Espera Inteligente de até 20 segundos
         wait = WebDriverWait(driver, 20)
         
-        # Espera o NOME aparecer
         tag_nome = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "h1.tit-prod")))
         nome_produto = tag_nome.text.strip()
 
-        # Tenta encontrar o PREÇO
         try:
             tag_preco = driver.find_element(By.ID, "valVista")
             preco_produto = limpar_preco(tag_preco.text)
             print(f"  -> [Terabyte] Status: Disponível! Preço: R$ {preco_produto}")
         except NoSuchElementException:
-            # Se o preço não existe, procura por "esgotado"
             try:
                 driver.find_element(By.XPATH, "//h2[contains(text(), 'Produto Indisponível')]")
                 print("  -> [Terabyte] Status: Produto Esgotado.")
                 preco_produto = 0.0
             except NoSuchElementException:
                 print("  -> [Terabyte] ALERTA: Preço/Esgotado não encontrado.")
-                preco_produto = None # Falha em pegar o preço
+                preco_produto = None
 
-        # Tenta encontrar a IMAGEM
         try:
             tag_imagem = driver.find_element(By.CSS_SELECTOR, "img.zoomImg")
             imagem_url = tag_imagem.get_attribute('src')
@@ -216,15 +218,10 @@ def buscar_dados_terabyte(driver, url):
         print(f"  -> [Terabyte] Exceção ao extrair dados: {e}")
     return nome_produto, preco_produto, imagem_url
 
-# --- REMOVIDA: Função get_selenium_soup() ---
-
 # --- FUNÇÃO PRINCIPAL DE BUSCA (ATUALIZADA) ---
 def buscar_dados_loja(driver, url, loja):
-    # Kabum usa requests (rápido e não usa o 'driver')
     if loja == "Kabum":
         return buscar_dados_kabum(url)
-    
-    # Pichau e Terabyte usam Selenium (o 'driver' compartilhado)
     elif loja == "Pichau":
         return buscar_dados_pichau(driver, url)
     elif loja == "Terabyte":
@@ -234,7 +231,7 @@ def buscar_dados_loja(driver, url, loja):
         return None, None, None
 
 # --- O PROGRAMA PRINCIPAL ---
-print(f"--- INICIANDO MONITOR DE PREÇOS (v9.3 - Anti-Bot com WebDriverWait) ---")
+print(f"--- INICIANDO MONITOR DE PREÇOS (v9.4 - Anti-Bot com Stealth) ---")
 
 resultados_de_hoje = []
 timestamp_agora = datetime.now()
@@ -246,7 +243,6 @@ for produto_base_info in LISTA_DE_PRODUTOS:
         print(f" Tentando loja: {loja}")
         
         try:
-            # Passa o 'driver' para a função principal
             nome_raspado, preco_raspado, imagem_raspada = buscar_dados_loja(driver, url_loja, loja)
             
             if nome_raspado and preco_raspado is not None:
@@ -266,7 +262,7 @@ for produto_base_info in LISTA_DE_PRODUTOS:
             import traceback
             traceback.print_exc()
         
-        print("  Pausando por 5 segundos...\n") # Pausa menor entre lojas
+        print("  Pausando por 5 segundos...\n")
         time.sleep(5)
 
 print("\nBusca concluída.")
@@ -297,7 +293,6 @@ if resultados_de_hoje:
         traceback.print_exc()
 else:
     print("Nenhum dado foi coletado hoje.")
-
 
 print("\nFechando o navegador Selenium...")
 driver.quit() 
