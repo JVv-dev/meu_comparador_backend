@@ -1,3 +1,5 @@
+# meu_comparador_backend/scraper.py (v9.1 - Com melhorias de erro)
+
 import requests
 from bs4 import BeautifulSoup
 import re
@@ -5,7 +7,7 @@ import pandas as pd
 from datetime import datetime
 import os
 import time
-from urllib.parse import urlparse
+import traceback # NOVO
 
 # --- Imports do Selenium ---
 from selenium import webdriver
@@ -13,7 +15,7 @@ from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.options import Options
 
-# --- NOVO: Imports para o Banco de Dados ---
+# --- Imports para o Banco de Dados ---
 from sqlalchemy import create_engine
 
 # --- LISTA DE ALVOS (Completa) ---
@@ -36,9 +38,6 @@ LISTA_DE_PRODUTOS = [
     },
 ]
 
-# --- REMOVIDO: ARQUIVO_CSV não é mais necessário ---
-# ARQUIVO_CSV = "precos.csv" 
-
 # --- HEADERS (Para Kabum e Selenium) ---
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
@@ -50,32 +49,7 @@ HEADERS = {
 s = requests.Session()
 s.headers.update(HEADERS)
 
-# --- Configuração do Selenium (para Pichau e Terabyte) ---
-print("Iniciando o navegador Selenium (headless)...")
-chrome_options = Options()
-chrome_options.add_argument("--headless") # Roda o Chrome sem abrir janela
-chrome_options.add_argument(f"user-agent={HEADERS['User-Agent']}")
-chrome_options.add_argument("--disable-gpu")
-chrome_options.add_argument("window-size=1920x1080")
-# NOVO: Argumentos para funcionar no Render/Linux
-chrome_options.add_argument("--no-sandbox") 
-chrome_options.add_argument("--disable-dev-shm-usage")
-
-
-try:
-    service = Service(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service, options=chrome_options)
-    print("Navegador Selenium iniciado com sucesso.")
-except Exception as e:
-    print(f"ERRO: Falha ao iniciar o Selenium/WebDriver.")
-    print(f"Verifique sua conexão ou instalação do Chrome. Erro: {e}")
-    # Se o driver falhar, não podemos continuar.
-    # Em um ambiente de produção (como o GitHub Actions), podemos querer que ele pare.
-    # Por enquanto, vamos sair para evitar mais erros.
-    exit()
-
 def limpar_preco(texto_preco):
-    """Limpa o texto do preço e transforma em número float."""
     if not texto_preco: return None
     preco_limpo = re.sub(r'[^\d,]', '', texto_preco)
     preco_limpo = preco_limpo.replace(',', '.')
@@ -84,7 +58,7 @@ def limpar_preco(texto_preco):
     except ValueError:
         return None
 
-# --- FUNÇÃO DE SCRAPING DA KABUM (OK) ---
+# --- FUNÇÕES DE SCRAPING DAS LOJAS (sem alterações) ---
 def buscar_dados_kabum(url, soup):
     nome_produto, preco_produto, imagem_url = None, None, None
     try:
@@ -104,18 +78,15 @@ def buscar_dados_kabum(url, soup):
             else: print("  -> [Kabum] ALERTA: Preço/Esgotado não encontrado.")
         tag_imagem = soup.select_one('img[src*="/produtos/fotos/"][src$="_gg.jpg"]')
         if tag_imagem is None:
-            print("  -> [Kabum] Padrão 1 de imagem falhou. Tentando Padrão 2...")
             tag_imagem = soup.select_one('img[src*="/produtos/fotos/sync_mirakl/"][src*="/xlarge/"]')
         if tag_imagem:
             imagem_url = tag_imagem.get('src')
             if imagem_url: print("  -> [Kabum] Imagem encontrada!")
-            else: print("  -> [Kabum] Tag <img> encontrada, mas sem 'src'.")
-        else: print("  -> [Kabum] Imagem principal não encontrada (Padrões 1 e 2 falharam).")
+        else: print("  -> [Kabum] Imagem principal não encontrada.")
     except Exception as e:
         print(f"  -> [Kabum] Exceção ao extrair dados: {e}")
     return nome_produto, preco_produto, imagem_url
 
-# --- FUNÇÃO DE SCRAPING DA PICHAU (OK) ---
 def buscar_dados_pichau(url, soup):
     nome_produto, preco_produto, imagem_url = None, None, None
     try:
@@ -131,7 +102,7 @@ def buscar_dados_pichau(url, soup):
         else:
             tag_esgotado_span = soup.find('span', class_="mui-1nlpwp-availability-outOfStock")
             if tag_esgotado_span:
-                print(f"  -> [Pichau] Status: Produto Esgotado (Encontrado: {tag_esgotado_span.text})")
+                print(f"  -> [Pichau] Status: Produto Esgotado")
                 preco_produto = 0.0
             else:
                 print("  -> [Pichau] ALERTA: Preço/Esgotado não encontrado.")
@@ -139,13 +110,11 @@ def buscar_dados_pichau(url, soup):
         if tag_imagem:
             imagem_url = tag_imagem.get('src')
             if imagem_url: print("  -> [Pichau] Imagem encontrada!")
-            else: print("  -> [Pichau] Tag <img> encontrada, mas sem 'src'.")
-        else: print("  -> [Pichau] Imagem principal não encontrada (class='iiz__img').")
+        else: print("  -> [Pichau] Imagem principal não encontrada.")
     except Exception as e:
         print(f"  -> [Pichau] Exceção ao extrair dados: {e}")
     return nome_produto, preco_produto, imagem_url
 
-# --- FUNÇÃO DE SCRAPING DA TERABYTE (COMPLETA) ---
 def buscar_dados_terabyte(url, soup):
     nome_produto, preco_produto, imagem_url = None, None, None
     try:
@@ -153,7 +122,7 @@ def buscar_dados_terabyte(url, soup):
         if tag_nome:
             nome_produto = tag_nome.text.strip()
         else:
-            print("  -> [Terabyte] Tag <h1> do nome não encontrada (class='tit-prod').")
+            print("  -> [Terabyte] Tag <h1> do nome não encontrada.")
         tag_preco = soup.find('p', id="valVista")
         if tag_preco:
             preco_produto = limpar_preco(tag_preco.text)
@@ -169,14 +138,34 @@ def buscar_dados_terabyte(url, soup):
         if tag_imagem:
             imagem_url = tag_imagem.get('src')
             if imagem_url: print("  -> [Terabyte] Imagem encontrada!")
-            else: print("  -> [Terabyte] Tag <img> encontrada, mas sem 'src'.")
-        else: print("  -> [Terabyte] Imagem principal não encontrada (class='zoomImg').")
+        else: print("  -> [Terabyte] Imagem principal não encontrada.")
     except Exception as e:
         print(f"  -> [Terabyte] Exceção ao extrair dados: {e}")
     return nome_produto, preco_produto, imagem_url
 
-# --- Função para buscar HTML com Selenium ---
-def get_selenium_soup(url):
+# --- Função de setup do Selenium ---
+def setup_driver():
+    print("Iniciando o navegador Selenium (headless)...")
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument(f"user-agent={HEADERS['User-Agent']}")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("window-size=1920x1080")
+    chrome_options.add_argument("--no-sandbox") 
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    
+    try:
+        service = Service(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=chrome_options)
+        print("Navegador Selenium iniciado com sucesso.")
+        return driver
+    except Exception as e:
+        print(f"ERRO: Falha ao iniciar o Selenium/WebDriver.")
+        print(f"Verifique sua conexão ou instalação do Chrome. Erro: {e}")
+        traceback.print_exc()
+        return None # Retorna None se falhar
+
+def get_selenium_soup(driver, url):
     """Usa o driver Selenium para carregar a página, esperar o JS, e retornar o Soup."""
     try:
         driver.get(url)
@@ -190,13 +179,11 @@ def get_selenium_soup(url):
 
         soup = BeautifulSoup(html, 'lxml')
         return soup
-    
     except Exception as e:
         print(f"  -> [Selenium] Erro ao carregar a página {url}: {e}")
         return None
 
-# --- FUNÇÃO PRINCIPAL DE BUSCA (Híbrida) ---
-def buscar_dados_loja(url, loja):
+def buscar_dados_loja(driver, url, loja):
     print(f"  Acessando {loja}: {url[:50]}...")
     try:
         if loja == "Kabum":
@@ -206,7 +193,11 @@ def buscar_dados_loja(url, loja):
             return buscar_dados_kabum(url, soup)
         
         elif loja == "Pichau" or loja == "Terabyte":
-            soup = get_selenium_soup(url)
+            if driver is None: # Se o driver não iniciou, pula
+                print(f"  -> [Selenium] Driver não está disponível, pulando {loja}.")
+                return None, None, None
+                
+            soup = get_selenium_soup(driver, url)
             if not soup:
                 print(f"  -> Falha ao obter HTML do Selenium para {loja}.")
                 return None, None, None
@@ -217,85 +208,103 @@ def buscar_dados_loja(url, loja):
         else:
             print(f"  -> Loja '{loja}' não suportada.")
             return None, None, None
+
+    # --- ERRO HANDLING REFINADO ---
+    # Erros de Request (Kabum)
     except requests.exceptions.HTTPError as err:
         print(f"  -> Erro HTTP [requests] ao acessar {loja}: {err}")
-        return None, None, None
     except requests.exceptions.RequestException as e:
         print(f"  -> Erro de conexão [requests] ao acessar {loja}: {e}")
-        return None, None, None
+    # Erros Gerais (incluindo Selenium)
     except Exception as e:
-        print(f"  -> Exceção GERAL ao processar {loja} ({url[:50]}...): {e}")
-        return None, None, None
+        print(f"  -> Exceção GERAL ao processar {loja} ({url[:50]}...):")
+        traceback.print_exc() # Imprime o stack trace
+        
+    # Se qualquer erro ocorrer, retorna None para todos
+    return None, None, None
+
 
 # --- O PROGRAMA PRINCIPAL ---
-print(f"--- INICIANDO MONITOR DE PREÇOS (v9.0 - PostgreSQL) ---")
+def main():
+    print(f"--- INICIANDO MONITOR DE PREÇOS (v9.1 - PostgreSQL) ---")
+    
+    driver = setup_driver() # Inicia o Selenium
+    
+    # Se o Selenium falhar ao iniciar, o driver será None
+    # O script continuará, mas pulará Pichau e Terabyte (veja em buscar_dados_loja)
 
-resultados_de_hoje = []
-timestamp_agora = datetime.now()
+    resultados_de_hoje = []
+    timestamp_agora = datetime.now()
+    erros_na_raspagem = False # Flag para saber se algo deu errado
 
-for produto_base_info in LISTA_DE_PRODUTOS:
-    nome_base = produto_base_info["nome_base"]
-    print(f"\nBuscando: {nome_base}...")
-    for loja, url_loja in produto_base_info["urls"].items():
-        print(f" Tentando loja: {loja}")
-        nome_raspado, preco_raspado, imagem_raspada = buscar_dados_loja(url_loja, loja)
-        if nome_raspado and preco_raspado is not None:
-            resultados_de_hoje.append({
-                "timestamp": timestamp_agora,
-                "produto_base": nome_base, 
-                "nome_completo_raspado": nome_raspado,
-                "preco": preco_raspado,
-                "imagem_url": imagem_raspada if imagem_raspada else "",
-                "loja": loja, 
-                "url": url_loja
-            })
-        else:
-            print(f"  -> Falha ao salvar dados de {nome_base} na loja {loja}.")
-        
-        print("  Pausando por 10 segundos...\n")
-        time.sleep(10)
-
-print("\nBusca concluída.")
-
-# --- NOVO: LÓGICA PARA SALVAR NO BANCO DE DADOS ---
-if resultados_de_hoje:
-    try:
-        df_hoje = pd.DataFrame(resultados_de_hoje)
-        colunas_ordenadas = ["timestamp", "produto_base", "nome_completo_raspado", "preco", "imagem_url", "loja", "url"]
-        df_hoje = df_hoje.reindex(columns=colunas_ordenadas)
-
-        # 1. Obter a URL de conexão do Ambiente
-        #    (Esta é a URL que você copiou do Render)
-        DATABASE_URL = os.environ.get('DATABASE_URL')
-        
-        if not DATABASE_URL:
-            print("ERRO CRÍTICO: A variável de ambiente 'DATABASE_URL' não foi encontrada.")
-            print("O script não pode salvar no banco de dados.")
-        else:
-            print("Conectando ao banco de dados...")
-            # Substitui 'postgres://' por 'postgresql://' se necessário (SQLAlchemy prefere)
-            if DATABASE_URL.startswith("postgres://"):
-                DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
-                
-            engine = create_engine(DATABASE_URL)
+    for produto_base_info in LISTA_DE_PRODUTOS:
+        nome_base = produto_base_info["nome_base"]
+        print(f"\nBuscando: {nome_base}...")
+        for loja, url_loja in produto_base_info["urls"].items():
+            print(f" Tentando loja: {loja}")
             
-            # 2. Enviar o DataFrame para a tabela 'precos'
-            #    if_exists='append' -> Adiciona as novas linhas, mantendo as antigas
-            #    index=False -> Não salva o índice do DataFrame como uma coluna
-            df_hoje.to_sql('precos', con=engine, if_exists='append', index=False)
+            nome_raspado, preco_raspado, imagem_raspada = buscar_dados_loja(driver, url_loja, loja)
             
-            print(f"Sucesso! {len(df_hoje)} registros foram salvos no banco de dados na tabela 'precos'.")
+            if nome_raspado and preco_raspado is not None:
+                resultados_de_hoje.append({
+                    "timestamp": timestamp_agora,
+                    "produto_base": nome_base, 
+                    "nome_completo_raspado": nome_raspado,
+                    "preco": preco_raspado,
+                    "imagem_url": imagem_raspada if imagem_raspada else "",
+                    "loja": loja, 
+                    "url": url_loja
+                })
+            else:
+                print(f"  -> FALHA ao salvar dados de {nome_base} na loja {loja}.")
+                # Se não for a Kabum, é um erro de Selenium
+                if loja in ["Pichau", "Terabyte"]:
+                    erros_na_raspagem = True # Marca que tivemos um problema
+            
+            print("  Pausando por 10 segundos...\n")
+            time.sleep(10)
 
-    except Exception as e:
-        print(f"ERRO ao salvar dados no banco de dados: {e}")
-        import traceback
-        traceback.print_exc()
+    print("\nBusca concluída.")
 
-else:
-    print("Nenhum dado foi coletado hoje.")
+    # --- Salvar no Banco de Dados ---
+    if resultados_de_hoje:
+        try:
+            df_hoje = pd.DataFrame(resultados_de_hoje)
+            colunas_ordenadas = ["timestamp", "produto_base", "nome_completo_raspado", "preco", "imagem_url", "loja", "url"]
+            df_hoje = df_hoje.reindex(columns=colunas_ordenadas)
 
+            DATABASE_URL = os.environ.get('DATABASE_URL')
+            
+            if not DATABASE_URL:
+                print("ERRO CRÍTICO: 'DATABASE_URL' não foi encontrada.")
+            else:
+                print("Conectando ao banco de dados...")
+                if DATABASE_URL.startswith("postgres://"):
+                    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+                    
+                engine = create_engine(DATABASE_URL)
+                df_hoje.to_sql('precos', con=engine, if_exists='append', index=False)
+                print(f"Sucesso! {len(df_hoje)} registros salvos no banco de dados 'precos'.")
 
-print("\nFechando o navegador Selenium...")
-driver.quit() 
+        except Exception as e:
+            print(f"ERRO ao salvar dados no banco de dados: {e}")
+            traceback.print_exc()
+            erros_na_raspagem = True # Se falhar o save, é um erro
+    else:
+        print("Nenhum dado foi coletado hoje.")
+        erros_na_raspagem = True # Se não coletou nada, algo está errado
 
-print("--- FIM DA EXECUÇÃO ---")
+    if driver:
+        print("\nFechando o navegador Selenium...")
+        driver.quit() 
+    
+    # --- NOVO: Falha a Action se algum erro ocorreu ---
+    if erros_na_raspagem:
+        print("\n--- EXECUÇÃO CONCLUÍDA COM ERROS ---")
+        # Isso fará a GitHub Action ficar vermelha (falhar)
+        # exit(1) # Comentado por enquanto para permitir salvar dados parciais
+    else:
+        print("\n--- EXECUÇÃO CONCLUÍDA COM SUCESSO ---")
+
+if __name__ == '__main__':
+    main()
