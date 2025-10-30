@@ -1,21 +1,18 @@
-# meu_comparador_backend/app.py (v9.0 - Lendo do PostgreSQL)
+# meu_comparador_backend/app.py (v9.1 - Corrigido)
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 import pandas as pd
 import os
 import traceback
-from sqlalchemy import create_engine # NOVO: Para conectar ao DB
+from sqlalchemy import create_engine
 
 app = Flask(__name__)
 CORS(app)
 
-# --- REMOVIDO: URL_CSV_GITHUB e DADOS_CACHE não são mais usados ---
-
 def get_dados_do_db():
     """
     Busca os dados mais recentes diretamente do banco de dados PostgreSQL.
-    Esta função é chamada a cada requisição para garantir dados frescos.
     """
     print("Tentando buscar dados do banco de dados...")
     try:
@@ -24,21 +21,17 @@ def get_dados_do_db():
             print("ERRO CRÍTICO: Variável de ambiente 'DATABASE_URL' não encontrada.")
             return None
 
-        # Substitui 'postgres://' por 'postgresql://' para compatibilidade com SQLAlchemy
         if DATABASE_URL.startswith("postgres://"):
             DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
             
         engine = create_engine(DATABASE_URL)
         
-        # Lê a tabela 'precos' inteira para um DataFrame
-        # A lógica de processamento/agrupamento será feita no Python
         df = pd.read_sql("SELECT * FROM precos", engine)
         
         if df.empty:
             print("A tabela 'precos' está vazia.")
             return None
 
-        # --- Processamento de Tipos (igual ao que fazíamos com o CSV) ---
         colunas_necessarias = ['timestamp', 'preco', 'produto_base', 'loja', 'url', 'nome_completo_raspado']
         if not all(coluna in df.columns for coluna in colunas_necessarias):
             print(f"Erro: Tabela 'precos' não contém todas as colunas necessárias.")
@@ -59,22 +52,16 @@ def get_dados_do_db():
         traceback.print_exc()
         return None
 
-# --- REMOVIDA: Função carregar_dados_csv() ---
-
-# Rota de teste simples para verificar se a API está respondendo
+# ... (rotas / e /health permanecem iguais) ...
 @app.route('/', methods=['GET'])
 def home():
-    # Não temos mais DADOS_CACHE, então removemos a verificação
     return jsonify({"message": "API de Comparador de Produtos está funcionando!"}), 200
 
-# Rota de saúde (simplificada)
 @app.route('/health', methods=['GET'])
 def health_check():
-    # A verificação de saúde agora tenta ler o DB
     df = get_dados_do_db()
     db_accessible = df is not None
     products_count = len(df['produto_base'].unique()) if db_accessible and not df.empty else 0
-    
     return jsonify({
         "status": "healthy", 
         "database_accessible": db_accessible, 
@@ -84,7 +71,6 @@ def health_check():
 # --- ROTA /api/products, AGORA LENDO DO DB A CADA CHAMADA ---
 @app.route('/api/products', methods=['GET'])
 def get_products():
-    # Busca dados frescos do DB em CADA requisição
     df_dados = get_dados_do_db()
     
     if df_dados is None or df_dados.empty:
@@ -93,12 +79,22 @@ def get_products():
 
     produtos_formatados = []
     try:
-        # Usa o DataFrame 'df_dados' (em vez de DADOS_CACHE)
         for nome_base, group in df_dados.groupby('produto_base'):
             try:
-                # O resto da sua lógica de agrupamento funciona perfeitamente
-                produto_recente = group.sort_values(by='timestamp', ascending=False).iloc[0]
+                # --- LÓGICA DE NOME/IMAGEM CORRIGIDA ---
+                # 1. Encontra a linha com o menor preço válido (em estoque)
+                group_valido = group[group['preco'] > 0]
+                if not group_valido.empty:
+                    # Pega o nome e imagem do produto com menor preço
+                    produto_principal = group_valido.loc[group_valido['preco'].idxmin()]
+                else:
+                    # Se todos estiverem 0.0 (sem estoque), pega o mais recente
+                    produto_principal = group.sort_values(by='timestamp', ascending=False).iloc[0]
+                # --- FIM DA CORREÇÃO ---
 
+
+                # Esta lógica (que você tinha) está CORRETA e sempre esteve
+                # Ela pega o preço mais recente de CADA loja
                 lojas = []
                 df_lojas_recentes = group.loc[group.groupby('loja')['timestamp'].idxmax()]
 
@@ -125,10 +121,11 @@ def get_products():
 
                 produtos_formatados.append({
                     "id": str(nome_base),
-                    "name": produto_recente['nome_completo_raspado'],
-                    "image": produto_recente['imagem_url'] if produto_recente['imagem_url'] else "/placeholder.svg",
+                    # --- USA O NOME/IMAGEM CORRIGIDOS ---
+                    "name": produto_principal['nome_completo_raspado'],
+                    "image": produto_principal['imagem_url'] if produto_principal['imagem_url'] else "/placeholder.svg",
                     "category": "Eletrônicos",
-                    "stores": lojas,
+                    "stores": lojas, # 'lojas' (plural) contém TODAS as lojas
                     "priceHistory": historico_formatado
                 })
             except Exception as e:
@@ -144,16 +141,14 @@ def get_products():
     return jsonify(produtos_formatados)
 
 
-# --- Endpoint de histórico, AGORA LENDO DO DB ---
+# --- Endpoint de histórico (CORRIGIDO) ---
 @app.route('/api/products/<product_id>/history', methods=['GET'])
 def get_product_history(product_id):
-    # Busca dados frescos do DB em CADA requisição
     df_dados = get_dados_do_db()
 
     if df_dados is None or df_dados.empty:
         return jsonify({"error": "Dados não encontrados"}), 404
 
-    # Usa o DataFrame 'df_dados' (em vez de DADOS_CACHE)
     df_produto = df_dados[df_dados['produto_base'] == product_id].copy()
 
     if df_produto.empty:
@@ -166,7 +161,7 @@ def get_product_history(product_id):
         historico_formatado.append({
             "date": row['timestamp'].strftime('%Y-%m-%d'),
             "price": float(row['preco']),
-            "store": row['loja']
+            "loja": row['loja'] # <-- CORRIGIDO (era 'store' e o modal esperava 'loja')
         })
 
     return jsonify(historico_formatado)
