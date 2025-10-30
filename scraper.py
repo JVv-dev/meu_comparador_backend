@@ -8,6 +8,7 @@ from datetime import datetime
 import os
 import time
 from urllib.parse import urlparse
+import traceback # Importa traceback
 
 # --- Imports do Selenium ---
 from selenium import webdriver
@@ -148,24 +149,29 @@ def buscar_dados_pichau(driver, url):
     nome_produto, preco_produto, imagem_url = None, None, None
     try:
         driver.get(url)
+        # Espera Inteligente de até 20 segundos
         wait = WebDriverWait(driver, 20)
         
+        # Espera o NOME aparecer
         tag_nome = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "h1.mui-1ri6pu6-product_info_title")))
         nome_produto = tag_nome.text.strip()
 
+        # Tenta encontrar o PREÇO
         try:
             tag_preco = driver.find_element(By.CSS_SELECTOR, "div.mui-1jk88bq-price_vista-extraSpacePriceVista")
             preco_produto = limpar_preco(tag_preco.text)
             print(f"  -> [Pichau] Status: Disponível! Preço: R$ {preco_produto}")
         except NoSuchElementException:
+            # Se o preço não existe, procura por "esgotado"
             try:
                 driver.find_element(By.CSS_SELECTOR, "span.mui-1nlpwp-availability-outOfStock")
                 print("  -> [Pichau] Status: Produto Esgotado")
                 preco_produto = 0.0
             except NoSuchElementException:
                 print("  -> [Pichau] ALERTA: Preço/Esgotado não encontrado.")
-                preco_produto = None
+                preco_produto = None # Falha em pegar o preço
 
+        # Tenta encontrar a IMAGEM
         try:
             tag_imagem = driver.find_element(By.CSS_SELECTOR, "img.iiz__img")
             imagem_url = tag_imagem.get_attribute('src')
@@ -186,24 +192,29 @@ def buscar_dados_terabyte(driver, url):
     nome_produto, preco_produto, imagem_url = None, None, None
     try:
         driver.get(url)
+        # Espera Inteligente de até 20 segundos
         wait = WebDriverWait(driver, 20)
         
+        # Espera o NOME aparecer
         tag_nome = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "h1.tit-prod")))
         nome_produto = tag_nome.text.strip()
 
+        # Tenta encontrar o PREÇO
         try:
             tag_preco = driver.find_element(By.ID, "valVista")
             preco_produto = limpar_preco(tag_preco.text)
             print(f"  -> [Terabyte] Status: Disponível! Preço: R$ {preco_produto}")
         except NoSuchElementException:
+            # Se o preço não existe, procura por "esgotado"
             try:
                 driver.find_element(By.XPATH, "//h2[contains(text(), 'Produto Indisponível')]")
                 print("  -> [Terabyte] Status: Produto Esgotado.")
                 preco_produto = 0.0
             except NoSuchElementException:
                 print("  -> [Terabyte] ALERTA: Preço/Esgotado não encontrado.")
-                preco_produto = None
+                preco_produto = None # Falha em pegar o preço
 
+        # Tenta encontrar a IMAGEM
         try:
             tag_imagem = driver.find_element(By.CSS_SELECTOR, "img.zoomImg")
             imagem_url = tag_imagem.get_attribute('src')
@@ -243,6 +254,7 @@ for produto_base_info in LISTA_DE_PRODUTOS:
         print(f" Tentando loja: {loja}")
         
         try:
+            # Passa o 'driver' para a função principal
             nome_raspado, preco_raspado, imagem_raspada = buscar_dados_loja(driver, url_loja, loja)
             
             if nome_raspado and preco_raspado is not None:
@@ -259,10 +271,9 @@ for produto_base_info in LISTA_DE_PRODUTOS:
                 print(f"  -> Falha ao extrair dados de {nome_base} na loja {loja}.")
         except Exception as e:
             print(f"  -> ERRO INESPERADO no loop da loja {loja}: {e}")
-            import traceback
-            traceback.print_exc()
+            traceback.print_exc() # Imprime o stack trace completo do erro
         
-        print("  Pausando por 5 segundos...\n")
+        print("  Pausando por 5 segundos...\n") # Pausa menor entre lojas
         time.sleep(5)
 
 print("\nBusca concluída.")
@@ -289,10 +300,10 @@ if resultados_de_hoje:
             print(f"Sucesso! {len(df_hoje)} registros foram salvos no banco de dados na tabela 'precos'.")
     except Exception as e:
         print(f"ERRO ao salvar dados no banco de dados: {e}")
-        import traceback
         traceback.print_exc()
 else:
     print("Nenhum dado foi coletado hoje.")
+
 
 print("\nFechando o navegador Selenium...")
 driver.quit() 
