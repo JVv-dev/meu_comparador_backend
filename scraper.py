@@ -1,4 +1,4 @@
-# meu_comparador_backend/scraper.py (Revertido para CSV)
+# meu_comparador_backend/scraper.py (v10.0 - Salvando no PostgreSQL)
 
 import requests
 from bs4 import BeautifulSoup
@@ -14,6 +14,13 @@ from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.options import Options
+
+# --- Imports para o Banco de Dados ---
+from sqlalchemy import create_engine
+from dotenv import load_dotenv # Para ler o arquivo .env
+
+# --- Carrega as variáveis do arquivo .env (DATABASE_URL) ---
+load_dotenv()
 
 # --- LISTA DE ALVOS (Completa) ---
 LISTA_DE_PRODUTOS = [
@@ -35,8 +42,7 @@ LISTA_DE_PRODUTOS = [
     },
 ]
 
-ARQUIVO_CSV = "precos.csv"
-# NOTA: Este script agora salvará o precos.csv na pasta onde ele for executado.
+# --- REMOVIDO: ARQUIVO_CSV não é mais necessário ---
 
 # --- HEADERS (Para Kabum e Selenium) ---
 HEADERS = {
@@ -54,8 +60,7 @@ chrome_options.add_argument("--headless")
 chrome_options.add_argument(f"user-agent={HEADERS['User-Agent']}")
 chrome_options.add_argument("--disable-gpu")
 chrome_options.add_argument("window-size=1920x1080")
-# NOTA: Se for rodar no GitHub Actions, adicione --no-sandbox e --disable-dev-shm-usage
-# Mas para rodar localmente, estas opções são melhores.
+# Para rodar localmente, não precisamos do --no-sandbox
 
 try:
     service = Service(ChromeDriverManager().install())
@@ -201,8 +206,8 @@ def buscar_dados_loja(url, loja):
         print(f"  -> Exceção GERAL ao processar {loja} ({url[:50]}...): {e}")
     return None, None, None
 
-# --- O PROGRAMA PRINCIPAL (v8.2) ---
-print(f"--- INICIANDO MONITOR DE PREÇOS (v8.2 - Híbrido - 3 Lojas) ---")
+# --- O PROGRAMA PRINCIPAL (v10.0 - Salvando no DB) ---
+print(f"--- INICIANDO MONITOR DE PREÇOS (v10.0 - Salvando no DB) ---")
 
 resultados_de_hoje = []
 timestamp_agora = datetime.now()
@@ -231,31 +236,39 @@ for produto_base_info in LISTA_DE_PRODUTOS:
 
 print("\nBusca concluída.")
 
+# --- NOVO: LÓGICA PARA SALVAR NO BANCO DE DADOS ---
 if resultados_de_hoje:
-    df_hoje = pd.DataFrame(resultados_de_hoje)
-    colunas_ordenadas = ["timestamp", "produto_base", "nome_completo_raspado", "preco", "imagem_url", "loja", "url"]
-    df_hoje = df_hoje.reindex(columns=colunas_ordenadas)
+    try:
+        df_hoje = pd.DataFrame(resultados_de_hoje)
+        colunas_ordenadas = ["timestamp", "produto_base", "nome_completo_raspado", "preco", "imagem_url", "loja", "url"]
+        df_hoje = df_hoje.reindex(columns=colunas_ordenadas)
 
-    # --- LÓGICA DE CSV REVERTIDA ---
-    if os.path.exists(ARQUIVO_CSV):
-        # Lê o CSV antigo, se ele existir
-        try:
-            df_antigo = pd.read_csv(ARQUIVO_CSV, sep=';')
-            # Concatena o antigo com o novo
-            df_final = pd.concat([df_antigo, df_hoje], ignore_index=True)
-            print(f"Resultados adicionados ao '{ARQUIVO_CSV}' existente.")
-        except pd.errors.EmptyDataError:
-            df_final = df_hoje # Se o CSV existir mas estiver vazio
-            print(f"Novo arquivo '{ARQUIVO_CSV}' criado (estava vazio).")
-    else:
-        df_final = df_hoje
-        print(f"Novo arquivo '{ARQUIVO_CSV}' criado com os resultados.")
+        # 1. Obter a URL de conexão do Ambiente (do arquivo .env)
+        DATABASE_URL = os.environ.get('DATABASE_URL')
+        
+        if not DATABASE_URL:
+            print("ERRO CRÍTICO: A variável de ambiente 'DATABASE_URL' não foi encontrada.")
+            print("Verifique se você criou o arquivo .env e colocou a URL lá.")
+        else:
+            print("Conectando ao banco de dados...")
+            if DATABASE_URL.startswith("postgres://"):
+                DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+                
+            engine = create_engine(DATABASE_URL)
+            
+            # 2. Envia o DataFrame para a tabela 'precos'
+            #    if_exists='append' -> Adiciona as novas linhas, mantendo as antigas
+            df_hoje.to_sql('precos', con=engine, if_exists='append', index=False)
+            
+            print(f"Sucesso! {len(df_hoje)} registros foram salvos no banco de dados na tabela 'precos'.")
 
-    # Salva o arquivo CSV completo
-    df_final.to_csv(ARQUIVO_CSV, mode='w', header=True, index=False, sep=';')
-    # --- FIM DA LÓGICA DE CSV ---
-    
-else: print("Nenhum dado foi coletado hoje.")
+    except Exception as e:
+        print(f"ERRO ao salvar dados no banco de dados: {e}")
+        import traceback
+        traceback.print_exc()
+
+else:
+    print("Nenhum dado foi coletado hoje.")
 
 
 print("\nFechando o navegador Selenium...")
