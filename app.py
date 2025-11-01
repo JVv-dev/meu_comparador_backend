@@ -1,35 +1,45 @@
-# meu_comparador_backend/app.py (Revertido para CSV)
+# meu_comparador_backend/app.py (v10.0 - Lendo do PostgreSQL)
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 import pandas as pd
 import os
-from datetime import datetime
-import requests
-import io
-import traceback 
+import traceback
+from sqlalchemy import create_engine # Para conectar ao DB
 
 app = Flask(__name__)
 CORS(app)
 
-# --- URL RAW DO SEU CSV NO GITHUB ---
-URL_CSV_GITHUB = "https://raw.githubusercontent.com/JVv-dev/meu_comparador_backend/master/precos.csv"
+# --- REMOVIDO: URL_CSV_GITHUB e Cache não são mais usados ---
 
-DADOS_CACHE = None
-
-def carregar_dados_csv():
-    global DADOS_CACHE
-    print(f"Tentando carregar CSV de: {URL_CSV_GITHUB}")
+def get_dados_do_db():
+    """
+    Busca os dados mais recentes diretamente do banco de dados PostgreSQL.
+    """
+    print("Tentando buscar dados do banco de dados...")
     try:
-        response = requests.get(URL_CSV_GITHUB, timeout=10) 
-        response.raise_for_status() 
+        DATABASE_URL = os.environ.get('DATABASE_URL')
+        if not DATABASE_URL:
+            print("ERRO CRÍTICO: Variável de ambiente 'DATABASE_URL' não encontrada.")
+            return None
 
-        csv_content = io.StringIO(response.text)
-        df = pd.read_csv(csv_content, sep=';')
+        # Substitui 'postgres://' por 'postgresql://' para compatibilidade com SQLAlchemy
+        if DATABASE_URL.startswith("postgres://"):
+            DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+            
+        engine = create_engine(DATABASE_URL)
+        
+        # Lê a tabela 'precos' inteira para um DataFrame
+        df = pd.read_sql("SELECT * FROM precos", engine)
+        
+        if df.empty:
+            print("A tabela 'precos' está vazia.")
+            return None
 
+        # --- Processamento de Tipos ---
         colunas_necessarias = ['timestamp', 'preco', 'produto_base', 'loja', 'url', 'nome_completo_raspado']
         if not all(coluna in df.columns for coluna in colunas_necessarias):
-            print(f"Erro: CSV baixado não contém todas as colunas necessárias: {colunas_necessarias}. Colunas encontradas: {df.columns.tolist()}")
+            print(f"Erro: Tabela 'precos' não contém todas as colunas necessárias.")
             return None
 
         df['timestamp'] = pd.to_datetime(df['timestamp'])
@@ -38,54 +48,55 @@ def carregar_dados_csv():
         if 'imagem_url' not in df.columns:
             df['imagem_url'] = ''
         df['imagem_url'] = df['imagem_url'].fillna('')
-
-        print("CSV carregado e processado com sucesso do GitHub.")
-        DADOS_CACHE = df
-        return DADOS_CACHE
-    except requests.exceptions.Timeout:
-        print(f"Erro: Tempo limite excedido ao baixar o CSV de {URL_CSV_GITHUB}")
-        return None
-    except requests.exceptions.RequestException as e:
-        print(f"Erro de requisição ao baixar o CSV do GitHub: {e}")
-        return None
+        
+        print(f"Sucesso! {len(df)} registros lidos do banco de dados.")
+        return df
+        
     except Exception as e:
-        print(f"Erro inesperado ao processar o CSV baixado:")
-        traceback.print_exc() 
+        print(f"Erro ao conectar ou ler do banco de dados:")
+        traceback.print_exc()
         return None
 
-# Carrega os dados na inicialização da API
-DADOS_CACHE = carregar_dados_csv()
-
+# Rota de teste
 @app.route('/', methods=['GET'])
 def home():
-    return jsonify({"message": "API de Comparador de Produtos está funcionando!", "csv_loaded": DADOS_CACHE is not None}), 200
+    return jsonify({"message": "API de Comparador de Produtos (v10.0 - DB Mode) está funcionando!"}), 200
 
+# Rota de saúde
 @app.route('/health', methods=['GET'])
 def health_check():
-    return jsonify({"status": "healthy", "csv_loaded": DADOS_CACHE is not None, "products_count": len(DADOS_CACHE['produto_base'].unique()) if DADOS_CACHE is not None else 0}), 200
+    df = get_dados_do_db()
+    db_accessible = df is not None
+    products_count = len(df['produto_base'].unique()) if db_accessible and not df.empty else 0
+    
+    return jsonify({
+        "status": "healthy", 
+        "database_accessible": db_accessible, 
+        "products_count": products_count
+    }), 200
 
+# Rota de Produtos
 @app.route('/api/products', methods=['GET'])
 def get_products():
-    global DADOS_CACHE
-    if DADOS_CACHE is None or DADOS_CACHE.empty:
-        print("Cache vazio ou DataFrame vazio para /api/products, tentando recarregar CSV...")
-        DADOS_CACHE = carregar_dados_csv()
-        if DADOS_CACHE is None or DADOS_CACHE.empty:
-            print("Nenhum dado válido carregado do CSV para /api/products após recarga.")
-            return jsonify({"error": "Não foi possível carregar os dados dos produtos ou o CSV está vazio."}), 500
+    # Busca dados frescos do DB em CADA requisição
+    df_dados = get_dados_do_db()
+    
+    if df_dados is None or df_dados.empty:
+        print("Nenhum dado válido carregado do banco de dados para /api/products.")
+        return jsonify({"error": "Não foi possível carregar os dados dos produtos."}), 500
 
     produtos_formatados = []
     try:
-        for nome_base, group in DADOS_CACHE.groupby('produto_base'):
+        for nome_base, group in df_dados.groupby('produto_base'):
             try:
-                # --- LÓGICA DE NOME/IMAGEM CORRIGIDA (do nosso teste anterior) ---
+                # Lógica para pegar o nome/imagem principal (do mais barato em estoque)
                 group_valido = group[group['preco'] > 0]
                 if not group_valido.empty:
                     produto_principal = group_valido.loc[group_valido['preco'].idxmin()]
                 else:
                     produto_principal = group.sort_values(by='timestamp', ascending=False).iloc[0]
-                # --- FIM DA CORREÇÃO ---
 
+                # Pega o preço mais recente de CADA loja
                 lojas = []
                 df_lojas_recentes = group.loc[group.groupby('loja')['timestamp'].idxmax()]
 
@@ -101,13 +112,14 @@ def get_products():
                         "inStock": loja_info['preco'] > 0 and not pd.isna(loja_info['preco'])
                     })
 
+                # Pega o histórico de preços
                 historico_df = group.sort_values('timestamp')[['timestamp', 'preco', 'loja']].drop_duplicates()
                 historico_formatado = []
                 for _, row in historico_df.iterrows():
                     historico_formatado.append({
                         "date": row['timestamp'].strftime('%Y-%m-%d'),
                         "price": float(row['preco']),
-                        "loja": row['loja'] # Corrigido (era 'store' no original)
+                        "loja": row['loja']
                     })
 
                 produtos_formatados.append({
@@ -127,19 +139,19 @@ def get_products():
         traceback.print_exc()
         return jsonify({"error": "Erro interno ao processar produtos"}), 500
 
-    print(f"Retornando {len(produtos_formatados)} produtos via API.")
+    print(f"Retornando {len(produtos_formatados)} produtos via API (lidos do DB).")
     return jsonify(produtos_formatados)
 
 
+# Endpoint de histórico
 @app.route('/api/products/<product_id>/history', methods=['GET'])
 def get_product_history(product_id):
-    global DADOS_CACHE
-    if DADOS_CACHE is None or DADOS_CACHE.empty:
-        DADOS_CACHE = carregar_dados_csv()
-        if DADOS_CACHE is None or DADOS_CACHE.empty:
-            return jsonify({"error": "Dados não encontrados ou CSV vazio"}), 404
+    df_dados = get_dados_do_db()
 
-    df_produto = DADOS_CACHE[DADOS_CACHE['produto_base'] == product_id].copy()
+    if df_dados is None or df_dados.empty:
+        return jsonify({"error": "Dados não encontrados"}), 404
+
+    df_produto = df_dados[df_dados['produto_base'] == product_id].copy()
 
     if df_produto.empty:
         return jsonify({"error": "Produto não encontrado ou sem histórico"}), 404
@@ -151,12 +163,13 @@ def get_product_history(product_id):
         historico_formatado.append({
             "date": row['timestamp'].strftime('%Y-%m-%d'),
             "price": float(row['preco']),
-            "loja": row['loja'] # <-- CORRIGIDO
+            "loja": row['loja']
         })
 
     return jsonify(historico_formatado)
 
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5001))
-    print(f"Rodando Flask localmente na porta {port}...")
+    print(f"Rodando Flask localmente na porta {port} (lendo do DB)...")
     app.run(debug=True, host='0.0.0.0', port=port)
