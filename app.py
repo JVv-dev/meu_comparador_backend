@@ -1,4 +1,4 @@
-# meu_comparador_backend/app.py (v10.1 - Com Categoria Dinâmica)
+# meu_comparador_backend/app.py (v10.2 - Com Stats de Preço)
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -6,6 +6,7 @@ import pandas as pd
 import os
 import traceback
 from sqlalchemy import create_engine 
+import numpy as np # Necessário para lidar com valores vazios
 
 app = Flask(__name__)
 CORS(app)
@@ -33,7 +34,6 @@ def get_dados_do_db():
             return None
 
         # --- Processamento de Tipos ---
-        # Define as colunas *mínimas* necessárias
         colunas_necessarias = ['timestamp', 'preco', 'produto_base', 'loja', 'url', 'nome_completo_raspado']
         if not all(coluna in df.columns for coluna in colunas_necessarias):
             print(f"Erro: Tabela 'precos' não contém todas as colunas necessárias.")
@@ -42,15 +42,13 @@ def get_dados_do_db():
         df['timestamp'] = pd.to_datetime(df['timestamp'])
         df['preco'] = pd.to_numeric(df['preco'], errors='coerce').fillna(0.0)
 
-        # --- MUDANÇA AQUI: Fallbacks para colunas novas ---
         if 'imagem_url' not in df.columns:
-            df['imagem_url'] = '' # Cria coluna vazia se não existir
-        df['imagem_url'] = df['imagem_url'].fillna('') # Preenche nulos
+            df['imagem_url'] = ''
+        df['imagem_url'] = df['imagem_url'].fillna('')
         
         if 'categoria' not in df.columns:
-            df['categoria'] = 'Eletrônicos' # Cria coluna padrão se não existir
-        df['categoria'] = df['categoria'].fillna('Eletrônicos') # Preenche nulos
-        # --- FIM DA MUDANÇA ---
+            df['categoria'] = 'Eletrônicos'
+        df['categoria'] = df['categoria'].fillna('Eletrônicos')
         
         print(f"Sucesso! {len(df)} registros lidos do banco de dados.")
         return df
@@ -63,7 +61,7 @@ def get_dados_do_db():
 # Rota de teste
 @app.route('/', methods=['GET'])
 def home():
-    return jsonify({"message": "API de Comparador de Produtos (v10.1 - Categoria) está funcionando!"}), 200
+    return jsonify({"message": "API de Comparador de Produtos (v10.2 - Stats) está funcionando!"}), 200
 
 # Rota de saúde
 @app.route('/health', methods=['GET'])
@@ -91,12 +89,25 @@ def get_products():
     try:
         for nome_base, group in df_dados.groupby('produto_base'):
             try:
+                # Lógica para pegar o nome/imagem principal
                 group_valido = group[group['preco'] > 0]
                 if not group_valido.empty:
                     produto_principal = group_valido.loc[group_valido['preco'].idxmin()]
                 else:
                     produto_principal = group.sort_values(by='timestamp', ascending=False).iloc[0]
 
+                # --- MUDANÇA: CÁLCULO DE STATS ---
+                precos_historicos_validos = group[group['preco'] > 0]['preco']
+                preco_min_historico = 0.0
+                preco_medio_historico = 0.0
+
+                if not precos_historicos_validos.empty:
+                    # Usamos float() para garantir que é um tipo JSON-safe (não numpy.float64)
+                    preco_min_historico = float(precos_historicos_validos.min())
+                    preco_medio_historico = float(precos_historicos_validos.mean())
+                # --- FIM DA MUDANÇA ---
+
+                # Pega o preço mais recente de CADA loja
                 lojas = []
                 df_lojas_recentes = group.loc[group.groupby('loja')['timestamp'].idxmax()]
 
@@ -112,6 +123,7 @@ def get_products():
                         "inStock": loja_info['preco'] > 0 and not pd.isna(loja_info['preco'])
                     })
 
+                # Pega o histórico de preços para o gráfico
                 historico_df = group.sort_values('timestamp')[['timestamp', 'preco', 'loja']].drop_duplicates()
                 historico_formatado = []
                 for _, row in historico_df.iterrows():
@@ -121,14 +133,16 @@ def get_products():
                         "loja": row['loja']
                     })
 
-                # --- MUDANÇA AQUI ---
+                # --- MUDANÇA: Adiciona stats ao JSON de retorno ---
                 produtos_formatados.append({
                     "id": str(nome_base),
                     "name": produto_principal['nome_completo_raspado'],
                     "image": produto_principal['imagem_url'],
-                    "category": produto_principal['categoria'], # <-- USA O VALOR DINÂMICO
+                    "category": produto_principal['categoria'],
                     "stores": lojas,
-                    "priceHistory": historico_formatado
+                    "priceHistory": historico_formatado,
+                    "precoMinimoHistorico": preco_min_historico, # <-- ADICIONADO
+                    "precoMedioHistorico": preco_medio_historico  # <-- ADICIONADO
                 })
                 # --- FIM DA MUDANÇA ---
 
