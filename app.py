@@ -1,16 +1,14 @@
-# meu_comparador_backend/app.py (v10.0 - Lendo do PostgreSQL)
+# meu_comparador_backend/app.py (v10.1 - Com Categoria Dinâmica)
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 import pandas as pd
 import os
 import traceback
-from sqlalchemy import create_engine # Para conectar ao DB
+from sqlalchemy import create_engine 
 
 app = Flask(__name__)
 CORS(app)
-
-# --- REMOVIDO: URL_CSV_GITHUB e Cache não são mais usados ---
 
 def get_dados_do_db():
     """
@@ -23,13 +21,11 @@ def get_dados_do_db():
             print("ERRO CRÍTICO: Variável de ambiente 'DATABASE_URL' não encontrada.")
             return None
 
-        # Substitui 'postgres://' por 'postgresql://' para compatibilidade com SQLAlchemy
         if DATABASE_URL.startswith("postgres://"):
             DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
             
         engine = create_engine(DATABASE_URL)
         
-        # Lê a tabela 'precos' inteira para um DataFrame
         df = pd.read_sql("SELECT * FROM precos", engine)
         
         if df.empty:
@@ -37,6 +33,7 @@ def get_dados_do_db():
             return None
 
         # --- Processamento de Tipos ---
+        # Define as colunas *mínimas* necessárias
         colunas_necessarias = ['timestamp', 'preco', 'produto_base', 'loja', 'url', 'nome_completo_raspado']
         if not all(coluna in df.columns for coluna in colunas_necessarias):
             print(f"Erro: Tabela 'precos' não contém todas as colunas necessárias.")
@@ -45,9 +42,15 @@ def get_dados_do_db():
         df['timestamp'] = pd.to_datetime(df['timestamp'])
         df['preco'] = pd.to_numeric(df['preco'], errors='coerce').fillna(0.0)
 
+        # --- MUDANÇA AQUI: Fallbacks para colunas novas ---
         if 'imagem_url' not in df.columns:
-            df['imagem_url'] = ''
-        df['imagem_url'] = df['imagem_url'].fillna('')
+            df['imagem_url'] = '' # Cria coluna vazia se não existir
+        df['imagem_url'] = df['imagem_url'].fillna('') # Preenche nulos
+        
+        if 'categoria' not in df.columns:
+            df['categoria'] = 'Eletrônicos' # Cria coluna padrão se não existir
+        df['categoria'] = df['categoria'].fillna('Eletrônicos') # Preenche nulos
+        # --- FIM DA MUDANÇA ---
         
         print(f"Sucesso! {len(df)} registros lidos do banco de dados.")
         return df
@@ -60,7 +63,7 @@ def get_dados_do_db():
 # Rota de teste
 @app.route('/', methods=['GET'])
 def home():
-    return jsonify({"message": "API de Comparador de Produtos (v10.0 - DB Mode) está funcionando!"}), 200
+    return jsonify({"message": "API de Comparador de Produtos (v10.1 - Categoria) está funcionando!"}), 200
 
 # Rota de saúde
 @app.route('/health', methods=['GET'])
@@ -78,7 +81,6 @@ def health_check():
 # Rota de Produtos
 @app.route('/api/products', methods=['GET'])
 def get_products():
-    # Busca dados frescos do DB em CADA requisição
     df_dados = get_dados_do_db()
     
     if df_dados is None or df_dados.empty:
@@ -89,14 +91,12 @@ def get_products():
     try:
         for nome_base, group in df_dados.groupby('produto_base'):
             try:
-                # Lógica para pegar o nome/imagem principal (do mais barato em estoque)
                 group_valido = group[group['preco'] > 0]
                 if not group_valido.empty:
                     produto_principal = group_valido.loc[group_valido['preco'].idxmin()]
                 else:
                     produto_principal = group.sort_values(by='timestamp', ascending=False).iloc[0]
 
-                # Pega o preço mais recente de CADA loja
                 lojas = []
                 df_lojas_recentes = group.loc[group.groupby('loja')['timestamp'].idxmax()]
 
@@ -112,7 +112,6 @@ def get_products():
                         "inStock": loja_info['preco'] > 0 and not pd.isna(loja_info['preco'])
                     })
 
-                # Pega o histórico de preços
                 historico_df = group.sort_values('timestamp')[['timestamp', 'preco', 'loja']].drop_duplicates()
                 historico_formatado = []
                 for _, row in historico_df.iterrows():
@@ -122,14 +121,17 @@ def get_products():
                         "loja": row['loja']
                     })
 
+                # --- MUDANÇA AQUI ---
                 produtos_formatados.append({
                     "id": str(nome_base),
                     "name": produto_principal['nome_completo_raspado'],
-                    "image": produto_principal['imagem_url'] if produto_principal['imagem_url'] else "/placeholder.svg",
-                    "category": "Eletrônicos",
+                    "image": produto_principal['imagem_url'],
+                    "category": produto_principal['categoria'], # <-- USA O VALOR DINÂMICO
                     "stores": lojas,
                     "priceHistory": historico_formatado
                 })
+                # --- FIM DA MUDANÇA ---
+
             except Exception as e:
                 print(f"Erro detalhado ao processar produto '{nome_base}': {e}")
                 traceback.print_exc()
@@ -143,21 +145,16 @@ def get_products():
     return jsonify(produtos_formatados)
 
 
-# Endpoint de histórico
+# Endpoint de histórico (sem mudanças)
 @app.route('/api/products/<product_id>/history', methods=['GET'])
 def get_product_history(product_id):
     df_dados = get_dados_do_db()
-
     if df_dados is None or df_dados.empty:
         return jsonify({"error": "Dados não encontrados"}), 404
-
     df_produto = df_dados[df_dados['produto_base'] == product_id].copy()
-
     if df_produto.empty:
         return jsonify({"error": "Produto não encontrado ou sem histórico"}), 404
-
     df_historico = df_produto.sort_values('timestamp')[['timestamp', 'preco', 'loja']].drop_duplicates()
-
     historico_formatado = []
     for _, row in df_historico.iterrows():
         historico_formatado.append({
@@ -165,7 +162,6 @@ def get_product_history(product_id):
             "price": float(row['preco']),
             "loja": row['loja']
         })
-
     return jsonify(historico_formatado)
 
 
