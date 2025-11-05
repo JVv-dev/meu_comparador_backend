@@ -1,4 +1,4 @@
-# meu_comparador_backend/scraper.py (v10.0 - Salvando no PostgreSQL)
+# meu_comparador_backend/scraper.py (v10.1 - Com Categoria Dinâmica)
 
 import requests
 from bs4 import BeautifulSoup
@@ -8,6 +8,7 @@ from datetime import datetime
 import os
 import time
 from urllib.parse import urlparse
+import traceback
 
 # --- Imports do Selenium ---
 from selenium import webdriver
@@ -22,29 +23,125 @@ from dotenv import load_dotenv # Para ler o arquivo .env
 # --- Carrega as variáveis do arquivo .env (DATABASE_URL) ---
 load_dotenv()
 
-# --- LISTA DE ALVOS (Completa) ---
+# --- LISTA DE ALVOS (COM CATEGORIA) ---
 LISTA_DE_PRODUTOS = [
-    {
-        "nome_base": "RX 6600",
-        "urls": {
-            "Kabum": "https://www.kabum.com.br/produto/235984/placa-de-video-rx-6600-cld-8g-asrock-amd-radeon-8gb-gddr6-90-ga2rzz-00uanf",
-            "Pichau": "https://pichau.com.br/placa-de-video-asrock-radeon-rx-6600-challenger-d-8gb-gddr6-128-bit-90-ga2rzz-00uanf",
-            "Terabyte": "https://www.terabyteshop.com.br/produto/19808/placa-de-video-asrock-radeon-rx-6600-challenger-d-8gb-gddr6-fsr-ray-tracing-90-ga2rzz-00uanf"
-        }
-    },
+    
+    # --- NOVOS PRODUTOS (GPUs) ---
+    # --- Nvidia ---
+    # Não Afiliado
     {
         "nome_base": "RTX 4070",
+        "categoria": "Placa de Vídeo",  
         "urls": {
             "Kabum": "https://www.kabum.com.br/produto/461699/placa-de-video-rtx-4070-windforce-oc-gigabyte-geforce-12gb-gddr6x-dlss-ray-tracing-gv-n4070wf3oc-12gd",
             "Pichau": "https://pichau.com.br/placa-de-video-gigabyte-geforce-rtx-4070-super-windforce-oc-12gb-gddr6x-192-bit-gv-n407swf3oc-12gd",
             "Terabyte": "https://www.terabyteshop.com.br/produto/24479/placa-de-video-gigabyte-geforce-rtx-4070-eagle-oc-12gb-gddr6x-dlss-ray-tracing-gv-n4070eagle-oc-12gd"
         }
     },
+    # Não Afiliado
+    {
+        "nome_base": " Palit GeForce RTX 5060 Ti Infinity",
+        "categoria": "Placa de Vídeo", 
+        "urls": {
+            "Kabum": "https://www.kabum.com.br/produto/776931",
+            "Pichau": "https://pichau.com.br/placa-de-video-palit-geforce-rtx-5060-ti-infinity-3-8gb-gddr7-128-bit-ne7506t019p1-gb2062s",
+            "Terabyte": "https://www.terabyteshop.com.br/produto/36060/placa-de-video-palit-nvidia-geforce-rtx-5060-infinity-3-8gb-gddr7-dlss-ray-tracing-ne75060019p1-gb2063s"
+        }
+    },
+    # Não Afiliado
+    {
+        "nome_base": " RTX 3060 12GB ",
+        "categoria": "Placa de Vídeo", 
+        "urls": {
+            "Kabum": "https://www.kabum.com.br/produto/153454",
+            "Pichau": "https://pichau.com.br/placa-de-video-maxsun-geforce-rtx-3060-terminator-12gb-gddr6-192-bit-ms-geforce-rtx3060-tr-12g",
+            "Terabyte": "https://www.terabyteshop.com.br/produto/21297/placa-de-video-msi-geforce-rtx-3060-ventus-2x-oc-lhr-12gb-gddr6-dlss-ray-tracing"
+        }
+    },
+
+    # --- A M D ---
+    # Não Afiliado
+    {
+        "nome_base": "RX 7600",
+        "categoria": "Placa de Vídeo", 
+        "urls": {
+            "Kabum": "https://www.kabum.com.br/produto/475647",
+            "Pichau": "https://pichau.com.br/placa-de-video-gigabyte-radeon-rx-7600-gaming-oc-8gb-gddr6-128-bit-gv-r76gaming-oc-8gd",
+            "Terabyte": "https://www.terabyteshop.com.br/produto/25487/placa-de-video-gigabyte-amd-radeon-rx-7600-gaming-oc-8gb-gddr6-fsr-ray-tracing-gv-r76gaming-oc-8gd"
+        }
+    },
+    # Não Afiliado
+    {
+        "nome_base": "RX 6600",
+        "categoria": "Placa de Vídeo", 
+        "urls": {
+            "Kabum": "https://www.kabum.com.br/produto/235984/placa-de-video-rx-6600-cld-8g-asrock-amd-radeon-8gb-gddr6-90-ga2rzz-00uanf",
+            "Pichau": "https://pichau.com.br/placa-de-video-asrock-radeon-rx-6600-challenger-d-8gb-gddr6-128-bit-90-ga2rzz-00uanf",
+            "Terabyte": "https://www.terabyteshop.com.br/produto/19808/placa-de-video-asrock-radeon-rx-6600-challenger-d-8gb-gddr6-fsr-ray-tracing-90-ga2rzz-00uanf"
+        }
+    },
+
+    # --- NOVOS PRODUTOS (Processadores) ---
+    # --- A M D ---
+    # Não afiliado
+    {
+        "nome_base": "Ryzen 5 7600",
+        "categoria": "Processador",
+        "urls": {
+            "Kabum": "https://www.kabum.com.br/produto/420277/processador-amd-ryzen-5-7600-3-8ghz-5-1ghz-turbo-cache-32mb-hexa-core-12-threads-am5-wraith-stealth-100-100001015box",
+            "Pichau": "https://www.pichau.com.br/processador-amd-ryzen-5-7600-6-core-12-threads-3-8ghz-5-1ghz-turbo-cache-38mb-am5-100-100001015box",
+            "Terabyte": "https://www.terabyteshop.com.br/produto/23415/processador-amd-ryzen-5-7600-38ghz-51ghz-turbo-6-cores-12-threads-am5-com-cooler-amd-wraith-stealth-100-100001015box"
+        }
+    },
+    {
+        "nome_base": "Ryzen 7 7800X3D",
+        "categoria": "Processador",
+        "urls": {
+            "Kabum": "https://www.kabum.com.br/produto/426262/processador-amd-ryzen-7-7800x3d-5-0ghz-max-turbo-cache-104mb-am5-8-nucleos-video-integrado-100-100000910wof",
+            "Pichau": "https://www.pichau.com.br/processador-amd-ryzen-7-7800x3d-8-core-16-threads-4-2ghz-5-0ghzturbo-cache-104mb-am5-100-100000910wof-br",
+            "Terabyte": "https://www.terabyteshop.com.br/produto/24769/processador-amd-ryzen-7-7800x3d-42ghz-50ghz-turbo-8-cores-16-threads-am5-sem-cooler-100-100000910wof"
+        }
+    },
+    # --- Intel ---
+
+
+    # --- NOVOS PRODUTOS (Placas-mãe) ---
+    # Não afiliado
+    {
+        "nome_base": "Placa-Mãe B650M Gigabyte",
+        "categoria": "Placa-Mãe",
+        "urls": {
+            "Kabum": "https://www.kabum.com.br/produto/505794",
+            "Pichau": "https://pichau.com.br/placa-mae-gigabyte-b650m-d3hp-ddr5-socket-am5-m-atx-chipset-amd-b650-b650m-d3hp",
+            "Terabyte": "https://www.terabyteshop.com.br/produto/28919/placa-mae-gigabyte-b650m-d3hp-chipset-b650-amd-am5-matx-ddr5"
+        }
+    },
+
+    # --- NOVOS PRODUTOS (Monitores) ---
+    # Não afiliado
+    {
+        "nome_base": "Monitor Gamer LG UltraGear 24' 180Hz",
+        "categoria": "Monitor",
+        "urls": {
+            "Kabum": "https://www.kabum.com.br/produto/614879",
+            "Pichau": "https://pichau.com.br/monitor-gamer-lg-24-pol-ips-fhd-1ms-180hz-freesync-g-sync-hdmi-dp-24gs60f-b-awzm",
+            "Terabyte": "https://www.terabyteshop.com.br/produto/31035/monitor-gamer-lg-ultragear-24-pol-full-hd-180hz-ips-1ms-freesyncg-sync-hdmidp-24gs60f-bawzm"
+        }
+    },
+
+    # --- NOVOS PRODUTOS (Fontes / PSU) ---
+    # Não afiliado
+    {
+        "nome_base": "Fonte Cooler Master Mwe Gold 750 V3 Atx 3.1 80 Plus Gold",
+        "categoria": "Fonte de Alimentação",
+        "urls": {
+            "Kabum": "https://www.kabum.com.br/produto/923379",
+            "Pichau": "https://pichau.com.br/fonte-cooler-master-mwe-gold-750-v3-750w-atx-3-1-80-plus-gold-preto-mpe-7506-acag-bbr",
+            #"Terabyte": " " nao possui o item
+        }
+    },
 ]
-
-# --- REMOVIDO: ARQUIVO_CSV não é mais necessário ---
-
-# --- HEADERS (Para Kabum e Selenium) ---
+# --- HEADERS ---
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
@@ -60,7 +157,6 @@ chrome_options.add_argument("--headless")
 chrome_options.add_argument(f"user-agent={HEADERS['User-Agent']}")
 chrome_options.add_argument("--disable-gpu")
 chrome_options.add_argument("window-size=1920x1080")
-# Para rodar localmente, não precisamos do --no-sandbox
 
 try:
     service = Service(ChromeDriverManager().install())
@@ -79,6 +175,8 @@ def limpar_preco(texto_preco):
         return float(preco_limpo)
     except ValueError:
         return None
+
+# ... (Funções buscar_dados_kabum, buscar_dados_pichau, buscar_dados_terabyte, get_selenium_soup, buscar_dados_loja permanecem EXATAMENTE IGUAIS) ...
 
 def buscar_dados_kabum(url, soup):
     nome_produto, preco_produto, imagem_url = None, None, None
@@ -205,23 +303,29 @@ def buscar_dados_loja(url, loja):
     except Exception as e:
         print(f"  -> Exceção GERAL ao processar {loja} ({url[:50]}...): {e}")
     return None, None, None
+# --- Fim das funções de busca ---
 
-# --- O PROGRAMA PRINCIPAL (v10.0 - Salvando no DB) ---
-print(f"--- INICIANDO MONITOR DE PREÇOS (v10.0 - Salvando no DB) ---")
+
+# --- O PROGRAMA PRINCIPAL (v10.1) ---
+print(f"--- INICIANDO MONITOR DE PREÇOS (v10.1 - Com Categoria) ---")
 
 resultados_de_hoje = []
 timestamp_agora = datetime.now()
 
 for produto_base_info in LISTA_DE_PRODUTOS:
     nome_base = produto_base_info["nome_base"]
-    print(f"\nBuscando: {nome_base}...")
+    categoria = produto_base_info["categoria"] # <--- MUDANÇA AQUI
+    print(f"\nBuscando: {nome_base} (Categoria: {categoria})")
+    
     for loja, url_loja in produto_base_info["urls"].items():
         print(f" Tentando loja: {loja}")
         nome_raspado, preco_raspado, imagem_raspada = buscar_dados_loja(url_loja, loja)
         if nome_raspado and preco_raspado is not None:
+            # --- MUDANÇA AQUI ---
             resultados_de_hoje.append({
                 "timestamp": timestamp_agora,
                 "produto_base": nome_base, 
+                "categoria": categoria, # <-- ADICIONADO
                 "nome_completo_raspado": nome_raspado,
                 "preco": preco_raspado,
                 "imagem_url": imagem_raspada if imagem_raspada else "",
@@ -236,14 +340,14 @@ for produto_base_info in LISTA_DE_PRODUTOS:
 
 print("\nBusca concluída.")
 
-# --- NOVO: LÓGICA PARA SALVAR NO BANCO DE DADOS ---
+# --- LÓGICA PARA SALVAR NO BANCO DE DADOS ---
 if resultados_de_hoje:
     try:
         df_hoje = pd.DataFrame(resultados_de_hoje)
-        colunas_ordenadas = ["timestamp", "produto_base", "nome_completo_raspado", "preco", "imagem_url", "loja", "url"]
+        # --- MUDANÇA AQUI ---
+        colunas_ordenadas = ["timestamp", "produto_base", "categoria", "nome_completo_raspado", "preco", "imagem_url", "loja", "url"]
         df_hoje = df_hoje.reindex(columns=colunas_ordenadas)
 
-        # 1. Obter a URL de conexão do Ambiente (do arquivo .env)
         DATABASE_URL = os.environ.get('DATABASE_URL')
         
         if not DATABASE_URL:
@@ -256,15 +360,15 @@ if resultados_de_hoje:
                 
             engine = create_engine(DATABASE_URL)
             
-            # 2. Envia o DataFrame para a tabela 'precos'
-            #    if_exists='append' -> Adiciona as novas linhas, mantendo as antigas
+            # if_exists='append' vai adicionar as novas linhas.
+            # O Pandas/SQLAlchemy é inteligente o suficiente para adicionar a nova coluna 'categoria'
+            # à tabela 'precos' se ela não existir.
             df_hoje.to_sql('precos', con=engine, if_exists='append', index=False)
             
             print(f"Sucesso! {len(df_hoje)} registros foram salvos no banco de dados na tabela 'precos'.")
 
     except Exception as e:
         print(f"ERRO ao salvar dados no banco de dados: {e}")
-        import traceback
         traceback.print_exc()
 
 else:

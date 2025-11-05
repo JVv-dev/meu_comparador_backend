@@ -1,4 +1,4 @@
-# meu_comparador_backend/app.py (v10.2 - Com Stats de Preço)
+# meu_comparador_backend/app.py (v10.3 - Com Rota de Produto Único)
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -6,15 +6,13 @@ import pandas as pd
 import os
 import traceback
 from sqlalchemy import create_engine 
-import numpy as np # Necessário para lidar com valores vazios
+import numpy as np
 
 app = Flask(__name__)
 CORS(app)
 
+# (A função get_dados_do_db() permanece exatamente a mesma)
 def get_dados_do_db():
-    """
-    Busca os dados mais recentes diretamente do banco de dados PostgreSQL.
-    """
     print("Tentando buscar dados do banco de dados...")
     try:
         DATABASE_URL = os.environ.get('DATABASE_URL')
@@ -33,7 +31,6 @@ def get_dados_do_db():
             print("A tabela 'precos' está vazia.")
             return None
 
-        # --- Processamento de Tipos ---
         colunas_necessarias = ['timestamp', 'preco', 'produto_base', 'loja', 'url', 'nome_completo_raspado']
         if not all(coluna in df.columns for coluna in colunas_necessarias):
             print(f"Erro: Tabela 'precos' não contém todas as colunas necessárias.")
@@ -58,12 +55,11 @@ def get_dados_do_db():
         traceback.print_exc()
         return None
 
-# Rota de teste
+# (As rotas / e /health permanecem as mesmas)
 @app.route('/', methods=['GET'])
 def home():
-    return jsonify({"message": "API de Comparador de Produtos (v10.2 - Stats) está funcionando!"}), 200
+    return jsonify({"message": "API de Comparador de Produtos (v10.3 - SEO) está funcionando!"}), 200
 
-# Rota de saúde
 @app.route('/health', methods=['GET'])
 def health_check():
     df = get_dados_do_db()
@@ -76,7 +72,7 @@ def health_check():
         "products_count": products_count
     }), 200
 
-# Rota de Produtos
+# (A rota /api/products permanece a mesma)
 @app.route('/api/products', methods=['GET'])
 def get_products():
     df_dados = get_dados_do_db()
@@ -89,25 +85,20 @@ def get_products():
     try:
         for nome_base, group in df_dados.groupby('produto_base'):
             try:
-                # Lógica para pegar o nome/imagem principal
                 group_valido = group[group['preco'] > 0]
                 if not group_valido.empty:
                     produto_principal = group_valido.loc[group_valido['preco'].idxmin()]
                 else:
                     produto_principal = group.sort_values(by='timestamp', ascending=False).iloc[0]
 
-                # --- MUDANÇA: CÁLCULO DE STATS ---
                 precos_historicos_validos = group[group['preco'] > 0]['preco']
                 preco_min_historico = 0.0
                 preco_medio_historico = 0.0
 
                 if not precos_historicos_validos.empty:
-                    # Usamos float() para garantir que é um tipo JSON-safe (não numpy.float64)
                     preco_min_historico = float(precos_historicos_validos.min())
                     preco_medio_historico = float(precos_historicos_validos.mean())
-                # --- FIM DA MUDANÇA ---
 
-                # Pega o preço mais recente de CADA loja
                 lojas = []
                 df_lojas_recentes = group.loc[group.groupby('loja')['timestamp'].idxmax()]
 
@@ -123,7 +114,6 @@ def get_products():
                         "inStock": loja_info['preco'] > 0 and not pd.isna(loja_info['preco'])
                     })
 
-                # Pega o histórico de preços para o gráfico
                 historico_df = group.sort_values('timestamp')[['timestamp', 'preco', 'loja']].drop_duplicates()
                 historico_formatado = []
                 for _, row in historico_df.iterrows():
@@ -133,18 +123,16 @@ def get_products():
                         "loja": row['loja']
                     })
 
-                # --- MUDANÇA: Adiciona stats ao JSON de retorno ---
                 produtos_formatados.append({
-                    "id": str(nome_base),
+                    "id": str(nome_base), # Este 'id' é o 'produto_base'
                     "name": produto_principal['nome_completo_raspado'],
                     "image": produto_principal['imagem_url'],
                     "category": produto_principal['categoria'],
                     "stores": lojas,
                     "priceHistory": historico_formatado,
-                    "precoMinimoHistorico": preco_min_historico, # <-- ADICIONADO
-                    "precoMedioHistorico": preco_medio_historico  # <-- ADICIONADO
+                    "precoMinimoHistorico": preco_min_historico, 
+                    "precoMedioHistorico": preco_medio_historico
                 })
-                # --- FIM DA MUDANÇA ---
 
             except Exception as e:
                 print(f"Erro detalhado ao processar produto '{nome_base}': {e}")
@@ -159,9 +147,10 @@ def get_products():
     return jsonify(produtos_formatados)
 
 
-# Endpoint de histórico (sem mudanças)
+# --- ROTA DE HISTÓRICO (sem mudanças) ---
 @app.route('/api/products/<product_id>/history', methods=['GET'])
 def get_product_history(product_id):
+    # ... (código existente, sem mudanças)
     df_dados = get_dados_do_db()
     if df_dados is None or df_dados.empty:
         return jsonify({"error": "Dados não encontrados"}), 404
@@ -177,6 +166,87 @@ def get_product_history(product_id):
             "loja": row['loja']
         })
     return jsonify(historico_formatado)
+
+# ---
+# --- NOVA ROTA DE PRODUTO ÚNICO ---
+# ---
+@app.route('/api/product/<path:product_base_name>', methods=['GET'])
+def get_single_product(product_base_name):
+    print(f"Buscando dados para produto único: {product_base_name}")
+    df_dados = get_dados_do_db()
+    
+    if df_dados is None or df_dados.empty:
+        print("Falha ao carregar dados do DB para produto único.")
+        return jsonify({"error": "Não foi possível carregar os dados."}), 500
+
+    # Filtra o DataFrame para conter apenas dados desse produto_base
+    df_produto = df_dados[df_dados['produto_base'] == product_base_name].copy()
+
+    if df_produto.empty:
+        print(f"Produto '{product_base_name}' não encontrado no banco de dados.")
+        return jsonify({"error": "Produto não encontrado"}), 404
+
+    # --- Reutiliza a lógica de formatação de '/api/products' ---
+    try:
+        group = df_produto # O 'group' agora é o nosso df_produto filtrado
+        
+        group_valido = group[group['preco'] > 0]
+        if not group_valido.empty:
+            produto_principal = group_valido.loc[group_valido['preco'].idxmin()]
+        else:
+            produto_principal = group.sort_values(by='timestamp', ascending=False).iloc[0]
+
+        precos_historicos_validos = group[group['preco'] > 0]['preco']
+        preco_min_historico = 0.0
+        preco_medio_historico = 0.0
+
+        if not precos_historicos_validos.empty:
+            preco_min_historico = float(precos_historicos_validos.min())
+            preco_medio_historico = float(precos_historicos_validos.mean())
+
+        lojas = []
+        df_lojas_recentes = group.loc[group.groupby('loja')['timestamp'].idxmax()]
+
+        for _, loja_info in df_lojas_recentes.iterrows():
+            lojas.append({
+                "name": loja_info['loja'],
+                "price": float(loja_info['preco']),
+                "originalPrice": None,
+                "shipping": "Consultar",
+                "rating": 0,
+                "reviews": 0,
+                "affiliateLink": loja_info['url'],
+                "inStock": loja_info['preco'] > 0 and not pd.isna(loja_info['preco'])
+            })
+
+        historico_df = group.sort_values('timestamp')[['timestamp', 'preco', 'loja']].drop_duplicates()
+        historico_formatado = []
+        for _, row in historico_df.iterrows():
+            historico_formatado.append({
+                "date": row['timestamp'].strftime('%Y-%m-%d'),
+                "price": float(row['preco']),
+                "loja": row['loja']
+            })
+
+        # Formata o produto único
+        produto_formatado = {
+            "id": str(product_base_name), 
+            "name": produto_principal['nome_completo_raspado'],
+            "image": produto_principal['imagem_url'],
+            "category": produto_principal['categoria'],
+            "stores": lojas,
+            "priceHistory": historico_formatado,
+            "precoMinimoHistorico": preco_min_historico, 
+            "precoMedioHistorico": preco_medio_historico
+        }
+        
+        print(f"Retornando dados formatados para: {product_base_name}")
+        return jsonify(produto_formatado) # Retorna um único objeto
+
+    except Exception as e:
+        print(f"Erro geral ao processar produto único '{product_base_name}': {e}")
+        traceback.print_exc()
+        return jsonify({"error": "Erro interno ao processar produto"}), 500
 
 
 if __name__ == '__main__':
