@@ -1,4 +1,4 @@
-# meu_comparador_backend/app.py (v10.3 - Com Rota de Produto Único)
+# meu_comparador_backend/app.py (v10.4 - Com .strip() na API)
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -11,7 +11,6 @@ import numpy as np
 app = Flask(__name__)
 CORS(app)
 
-# (A função get_dados_do_db() permanece exatamente a mesma)
 def get_dados_do_db():
     print("Tentando buscar dados do banco de dados...")
     try:
@@ -46,6 +45,11 @@ def get_dados_do_db():
         if 'categoria' not in df.columns:
             df['categoria'] = 'Eletrônicos'
         df['categoria'] = df['categoria'].fillna('Eletrônicos')
+
+        # --- MUDANÇA: Limpa os dados do banco na leitura ---
+        df['produto_base'] = df['produto_base'].str.strip()
+        df['categoria'] = df['categoria'].str.strip()
+        # --- FIM DA MUDANÇA ---
         
         print(f"Sucesso! {len(df)} registros lidos do banco de dados.")
         return df
@@ -55,11 +59,12 @@ def get_dados_do_db():
         traceback.print_exc()
         return None
 
-# (As rotas / e /health permanecem as mesmas)
+# Rota de teste
 @app.route('/', methods=['GET'])
 def home():
-    return jsonify({"message": "API de Comparador de Produtos (v10.3 - SEO) está funcionando!"}), 200
+    return jsonify({"message": "API de Comparador de Produtos (v10.4 - API .strip()) está funcionando!"}), 200
 
+# Rota de saúde
 @app.route('/health', methods=['GET'])
 def health_check():
     df = get_dados_do_db()
@@ -72,13 +77,12 @@ def health_check():
         "products_count": products_count
     }), 200
 
-# (A rota /api/products permanece a mesma)
+# Rota de Produtos (sem mudanças aqui, a limpeza é feita em get_dados_do_db)
 @app.route('/api/products', methods=['GET'])
 def get_products():
     df_dados = get_dados_do_db()
     
     if df_dados is None or df_dados.empty:
-        print("Nenhum dado válido carregado do banco de dados para /api/products.")
         return jsonify({"error": "Não foi possível carregar os dados dos produtos."}), 500
 
     produtos_formatados = []
@@ -124,10 +128,10 @@ def get_products():
                     })
 
                 produtos_formatados.append({
-                    "id": str(nome_base), # Este 'id' é o 'produto_base'
+                    "id": str(nome_base), 
                     "name": produto_principal['nome_completo_raspado'],
                     "image": produto_principal['imagem_url'],
-                    "category": produto_principal['categoria'],
+                    "category": produto_principal['categoria'], 
                     "stores": lojas,
                     "priceHistory": historico_formatado,
                     "precoMinimoHistorico": preco_min_historico, 
@@ -150,11 +154,15 @@ def get_products():
 # --- ROTA DE HISTÓRICO (sem mudanças) ---
 @app.route('/api/products/<product_id>/history', methods=['GET'])
 def get_product_history(product_id):
-    # ... (código existente, sem mudanças)
+    # --- MUDANÇA: Limpa o ID que chega ---
+    product_id_limpo = product_id.strip()
+    
     df_dados = get_dados_do_db()
     if df_dados is None or df_dados.empty:
         return jsonify({"error": "Dados não encontrados"}), 404
-    df_produto = df_dados[df_dados['produto_base'] == product_id].copy()
+        
+    df_produto = df_dados[df_dados['produto_base'] == product_id_limpo].copy() # Usa o ID limpo
+    
     if df_produto.empty:
         return jsonify({"error": "Produto não encontrado ou sem histórico"}), 404
     df_historico = df_produto.sort_values('timestamp')[['timestamp', 'preco', 'loja']].drop_duplicates()
@@ -168,27 +176,32 @@ def get_product_history(product_id):
     return jsonify(historico_formatado)
 
 # ---
-# --- NOVA ROTA DE PRODUTO ÚNICO ---
+# --- NOVA ROTA DE PRODUTO ÚNICO (COM .strip()) ---
 # ---
 @app.route('/api/product/<path:product_base_name>', methods=['GET'])
 def get_single_product(product_base_name):
-    print(f"Buscando dados para produto único: {product_base_name}")
+    
+    # --- MUDANÇA: Limpa o nome do produto que vem da URL ---
+    product_name_limpo = product_base_name.strip()
+    print(f"Buscando dados para produto único: '{product_name_limpo}'")
+    # --- FIM DA MUDANÇA ---
+
     df_dados = get_dados_do_db()
     
     if df_dados is None or df_dados.empty:
         print("Falha ao carregar dados do DB para produto único.")
         return jsonify({"error": "Não foi possível carregar os dados."}), 500
 
-    # Filtra o DataFrame para conter apenas dados desse produto_base
-    df_produto = df_dados[df_dados['produto_base'] == product_base_name].copy()
+    # Filtra o DataFrame usando o nome limpo (a coluna 'produto_base' já foi limpa pelo get_dados_do_db())
+    df_produto = df_dados[df_dados['produto_base'] == product_name_limpo].copy()
 
     if df_produto.empty:
-        print(f"Produto '{product_base_name}' não encontrado no banco de dados.")
+        print(f"Produto '{product_name_limpo}' não encontrado no banco de dados.")
         return jsonify({"error": "Produto não encontrado"}), 404
 
     # --- Reutiliza a lógica de formatação de '/api/products' ---
     try:
-        group = df_produto # O 'group' agora é o nosso df_produto filtrado
+        group = df_produto 
         
         group_valido = group[group['preco'] > 0]
         if not group_valido.empty:
@@ -228,9 +241,8 @@ def get_single_product(product_base_name):
                 "loja": row['loja']
             })
 
-        # Formata o produto único
         produto_formatado = {
-            "id": str(product_base_name), 
+            "id": str(product_name_limpo), 
             "name": produto_principal['nome_completo_raspado'],
             "image": produto_principal['imagem_url'],
             "category": produto_principal['categoria'],
@@ -240,11 +252,11 @@ def get_single_product(product_base_name):
             "precoMedioHistorico": preco_medio_historico
         }
         
-        print(f"Retornando dados formatados para: {product_base_name}")
-        return jsonify(produto_formatado) # Retorna um único objeto
+        print(f"Retornando dados formatados para: {product_name_limpo}")
+        return jsonify(produto_formatado) 
 
     except Exception as e:
-        print(f"Erro geral ao processar produto único '{product_base_name}': {e}")
+        print(f"Erro geral ao processar produto único '{product_name_limpo}': {e}")
         traceback.print_exc()
         return jsonify({"error": "Erro interno ao processar produto"}), 500
 
