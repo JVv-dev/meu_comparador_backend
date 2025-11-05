@@ -1,4 +1,4 @@
-# meu_comparador_backend/app.py (v10.4 - Com .strip() na API)
+# meu_comparador_backend/app.py (v11.0 - Rota de Produto Único)
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -12,6 +12,9 @@ app = Flask(__name__)
 CORS(app)
 
 def get_dados_do_db():
+    """
+    Busca os dados mais recentes diretamente do banco de dados PostgreSQL.
+    """
     print("Tentando buscar dados do banco de dados...")
     try:
         DATABASE_URL = os.environ.get('DATABASE_URL')
@@ -30,6 +33,7 @@ def get_dados_do_db():
             print("A tabela 'precos' está vazia.")
             return None
 
+        # --- Processamento de Tipos ---
         colunas_necessarias = ['timestamp', 'preco', 'produto_base', 'loja', 'url', 'nome_completo_raspado']
         if not all(coluna in df.columns for coluna in colunas_necessarias):
             print(f"Erro: Tabela 'precos' não contém todas as colunas necessárias.")
@@ -38,6 +42,7 @@ def get_dados_do_db():
         df['timestamp'] = pd.to_datetime(df['timestamp'])
         df['preco'] = pd.to_numeric(df['preco'], errors='coerce').fillna(0.0)
 
+        # Fallbacks para colunas novas
         if 'imagem_url' not in df.columns:
             df['imagem_url'] = ''
         df['imagem_url'] = df['imagem_url'].fillna('')
@@ -47,6 +52,7 @@ def get_dados_do_db():
         df['categoria'] = df['categoria'].fillna('Eletrônicos')
 
         # --- MUDANÇA: Limpa os dados do banco na leitura ---
+        # Isso corrige o bug dos espaços em branco (ex: " RTX 3060 ")
         df['produto_base'] = df['produto_base'].str.strip()
         df['categoria'] = df['categoria'].str.strip()
         # --- FIM DA MUDANÇA ---
@@ -62,7 +68,7 @@ def get_dados_do_db():
 # Rota de teste
 @app.route('/', methods=['GET'])
 def home():
-    return jsonify({"message": "API de Comparador de Produtos (v10.4 - API .strip()) está funcionando!"}), 200
+    return jsonify({"message": "API de Comparador de Produtos (v11.0 - SEO) está funcionando!"}), 200
 
 # Rota de saúde
 @app.route('/health', methods=['GET'])
@@ -77,7 +83,7 @@ def health_check():
         "products_count": products_count
     }), 200
 
-# Rota de Produtos (sem mudanças aqui, a limpeza é feita em get_dados_do_db)
+# Rota de Produtos (Principal)
 @app.route('/api/products', methods=['GET'])
 def get_products():
     df_dados = get_dados_do_db()
@@ -87,6 +93,7 @@ def get_products():
 
     produtos_formatados = []
     try:
+        # Agrupa pelos nomes de produto já limpos
         for nome_base, group in df_dados.groupby('produto_base'):
             try:
                 group_valido = group[group['preco'] > 0]
@@ -147,21 +154,19 @@ def get_products():
         traceback.print_exc()
         return jsonify({"error": "Erro interno ao processar produtos"}), 500
 
-    print(f"Retornando {len(produtos_formatados)} produtos via API (lidos do DB).")
     return jsonify(produtos_formatados)
 
 
-# --- ROTA DE HISTÓRICO (sem mudanças) ---
+# Rota de Histórico (Também limpa o ID)
 @app.route('/api/products/<product_id>/history', methods=['GET'])
 def get_product_history(product_id):
-    # --- MUDANÇA: Limpa o ID que chega ---
-    product_id_limpo = product_id.strip()
+    product_id_limpo = product_id.strip() # Limpa o ID
     
     df_dados = get_dados_do_db()
     if df_dados is None or df_dados.empty:
         return jsonify({"error": "Dados não encontrados"}), 404
         
-    df_produto = df_dados[df_dados['produto_base'] == product_id_limpo].copy() # Usa o ID limpo
+    df_produto = df_dados[df_dados['produto_base'] == product_id_limpo].copy() # Usa ID limpo
     
     if df_produto.empty:
         return jsonify({"error": "Produto não encontrado ou sem histórico"}), 404
@@ -176,15 +181,14 @@ def get_product_history(product_id):
     return jsonify(historico_formatado)
 
 # ---
-# --- NOVA ROTA DE PRODUTO ÚNICO (COM .strip()) ---
+# --- NOVA ROTA DE PRODUTO ÚNICO ---
 # ---
 @app.route('/api/product/<path:product_base_name>', methods=['GET'])
 def get_single_product(product_base_name):
     
-    # --- MUDANÇA: Limpa o nome do produto que vem da URL ---
+    # Limpa o nome do produto que vem da URL
     product_name_limpo = product_base_name.strip()
     print(f"Buscando dados para produto único: '{product_name_limpo}'")
-    # --- FIM DA MUDANÇA ---
 
     df_dados = get_dados_do_db()
     
@@ -192,7 +196,7 @@ def get_single_product(product_base_name):
         print("Falha ao carregar dados do DB para produto único.")
         return jsonify({"error": "Não foi possível carregar os dados."}), 500
 
-    # Filtra o DataFrame usando o nome limpo (a coluna 'produto_base' já foi limpa pelo get_dados_do_db())
+    # Filtra o DataFrame (coluna 'produto_base' já foi limpa pelo get_dados_do_db)
     df_produto = df_dados[df_dados['produto_base'] == product_name_limpo].copy()
 
     if df_produto.empty:
@@ -253,7 +257,7 @@ def get_single_product(product_base_name):
         }
         
         print(f"Retornando dados formatados para: {product_name_limpo}")
-        return jsonify(produto_formatado) 
+        return jsonify(produto_formatado) # Retorna um único objeto
 
     except Exception as e:
         print(f"Erro geral ao processar produto único '{product_name_limpo}': {e}")
