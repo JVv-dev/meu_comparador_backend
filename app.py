@@ -55,6 +55,9 @@ def get_dados_do_db():
         # Isso corrige o bug dos espaços em branco (ex: " RTX 3060 ")
         df['produto_base'] = df['produto_base'].str.strip()
         df['categoria'] = df['categoria'].str.strip()
+        if 'descricao' not in df.columns:
+            df['descricao'] = ''
+        df['descricao'] = df['descricao'].fillna('')
         # --- FIM DA MUDANÇA ---
         
         print(f"Sucesso! {len(df)} registros lidos do banco de dados.")
@@ -235,6 +238,11 @@ def get_single_product(product_base_name):
                 "affiliateLink": loja_info['url'],
                 "inStock": loja_info['preco'] > 0 and not pd.isna(loja_info['preco'])
             })
+        primeira_descricao_encontrada = ""
+        for desc in group['descricao']:
+            if desc and desc.strip():    
+                primeira_descricao_encontrada = desc
+                break
 
         historico_df = group.sort_values('timestamp')[['timestamp', 'preco', 'loja']].drop_duplicates()
         historico_formatado = []
@@ -253,7 +261,8 @@ def get_single_product(product_base_name):
             "stores": lojas,
             "priceHistory": historico_formatado,
             "precoMinimoHistorico": preco_min_historico, 
-            "precoMedioHistorico": preco_medio_historico
+            "precoMedioHistorico": preco_medio_historico,
+            "descricao": primeira_descricao_encontrada
         }
         
         print(f"Retornando dados formatados para: {product_name_limpo}")
