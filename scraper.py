@@ -1,11 +1,11 @@
-# meu_comparador_backend/scraper.py (v10.1 - Com Categoria Dinâmica)
+# meu_comparador_backend/scraper.py (v10.22 - Adicionando Descrição)
 
 import requests
 from bs4 import BeautifulSoup
 import re
 import pandas as pd
 from datetime import datetime
-import os
+import os 
 import time
 from urllib.parse import urlparse
 import traceback
@@ -15,6 +15,13 @@ from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.options import Options
+# --- NOVOS IMPORTS (STEALTH) ---
+from selenium_stealth import stealth
+# --- FIM DOS NOVOS IMPORTS ---
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.by import By
+
 
 # --- Imports para o Banco de Dados ---
 from sqlalchemy import create_engine
@@ -23,15 +30,15 @@ from dotenv import load_dotenv # Para ler o arquivo .env
 # --- Carrega as variáveis do arquivo .env (DATABASE_URL) ---
 load_dotenv()
 
-# --- LISTA DE ALVOS (COM CATEGORIA) ---
+# --- LISTA DE ALVOS (COM .strip()) ---
 LISTA_DE_PRODUTOS = [
     
     # --- NOVOS PRODUTOS (GPUs) ---
     # --- Nvidia ---
     # Não Afiliado
     {
-        "nome_base": "RTX 4070",
-        "categoria": "Placa de Vídeo",  
+        "nome_base": "RTX 4070".strip(),
+        "categoria": "Placa de Vídeo".strip(),  
         "urls": {
             "Kabum": "https://www.kabum.com.br/produto/461699/placa-de-video-rtx-4070-windforce-oc-gigabyte-geforce-12gb-gddr6x-dlss-ray-tracing-gv-n4070wf3oc-12gd",
             "Pichau": "https://pichau.com.br/placa-de-video-gigabyte-geforce-rtx-4070-super-windforce-oc-12gb-gddr6x-192-bit-gv-n407swf3oc-12gd",
@@ -40,8 +47,8 @@ LISTA_DE_PRODUTOS = [
     },
     # Não Afiliado
     {
-        "nome_base": " Palit GeForce RTX 5060 Ti Infinity",
-        "categoria": "Placa de Vídeo", 
+        "nome_base": " Palit GeForce RTX 5060 Ti Infinity".strip(),
+        "categoria": "Placa de Vídeo".strip(), 
         "urls": {
             "Kabum": "https://www.kabum.com.br/produto/776931",
             "Pichau": "https://pichau.com.br/placa-de-video-palit-geforce-rtx-5060-ti-infinity-3-8gb-gddr7-128-bit-ne7506t019p1-gb2062s",
@@ -50,8 +57,8 @@ LISTA_DE_PRODUTOS = [
     },
     # Não Afiliado
     {
-        "nome_base": " RTX 3060 12GB ",
-        "categoria": "Placa de Vídeo", 
+        "nome_base": " RTX 3060 12GB ".strip(),
+        "categoria": "Placa de Vídeo".strip(), 
         "urls": {
             "Kabum": "https://www.kabum.com.br/produto/153454",
             "Pichau": "https://pichau.com.br/placa-de-video-maxsun-geforce-rtx-3060-terminator-12gb-gddr6-192-bit-ms-geforce-rtx3060-tr-12g",
@@ -62,8 +69,8 @@ LISTA_DE_PRODUTOS = [
     # --- A M D ---
     # Não Afiliado
     {
-        "nome_base": "RX 7600",
-        "categoria": "Placa de Vídeo", 
+        "nome_base": "RX 7600".strip(),
+        "categoria": "Placa de Vídeo".strip(), 
         "urls": {
             "Kabum": "https://www.kabum.com.br/produto/475647",
             "Pichau": "https://pichau.com.br/placa-de-video-gigabyte-radeon-rx-7600-gaming-oc-8gb-gddr6-128-bit-gv-r76gaming-oc-8gd",
@@ -72,8 +79,8 @@ LISTA_DE_PRODUTOS = [
     },
     # Não Afiliado
     {
-        "nome_base": "RX 6600",
-        "categoria": "Placa de Vídeo", 
+        "nome_base": "RX 6600".strip(),
+        "categoria": "Placa de Vídeo".strip(), 
         "urls": {
             "Kabum": "https://www.kabum.com.br/produto/235984/placa-de-video-rx-6600-cld-8g-asrock-amd-radeon-8gb-gddr6-90-ga2rzz-00uanf",
             "Pichau": "https://pichau.com.br/placa-de-video-asrock-radeon-rx-6600-challenger-d-8gb-gddr6-128-bit-90-ga2rzz-00uanf",
@@ -85,17 +92,18 @@ LISTA_DE_PRODUTOS = [
     # --- A M D ---
     # Não afiliado
     {
-        "nome_base": "Ryzen 5 7600",
-        "categoria": "Processador",
+        "nome_base": "Ryzen 5 7600".strip(),
+        "categoria": "Processador".strip(),
         "urls": {
             "Kabum": "https://www.kabum.com.br/produto/420277/processador-amd-ryzen-5-7600-3-8ghz-5-1ghz-turbo-cache-32mb-hexa-core-12-threads-am5-wraith-stealth-100-100001015box",
             "Pichau": "https://www.pichau.com.br/processador-amd-ryzen-5-7600-6-core-12-threads-3-8ghz-5-1ghz-turbo-cache-38mb-am5-100-100001015box",
             "Terabyte": "https://www.terabyteshop.com.br/produto/23415/processador-amd-ryzen-5-7600-38ghz-51ghz-turbo-6-cores-12-threads-am5-com-cooler-amd-wraith-stealth-100-100001015box"
         }
     },
+    # Não afiliado
     {
-        "nome_base": "Ryzen 7 7800X3D",
-        "categoria": "Processador",
+        "nome_base": "Ryzen 7 7800X3D".strip(),
+        "categoria": "Processador".strip(),
         "urls": {
             "Kabum": "https://www.kabum.com.br/produto/426262/processador-amd-ryzen-7-7800x3d-5-0ghz-max-turbo-cache-104mb-am5-8-nucleos-video-integrado-100-100000910wof",
             "Pichau": "https://www.pichau.com.br/processador-amd-ryzen-7-7800x3d-8-core-16-threads-4-2ghz-5-0ghzturbo-cache-104mb-am5-100-100000910wof-br",
@@ -108,8 +116,8 @@ LISTA_DE_PRODUTOS = [
     # --- NOVOS PRODUTOS (Placas-mãe) ---
     # Não afiliado
     {
-        "nome_base": "Placa-Mãe B650M Gigabyte",
-        "categoria": "Placa-Mãe",
+        "nome_base": "Placa-Mãe B650M Gigabyte".strip(),
+        "categoria": "Placa-Mãe".strip(),
         "urls": {
             "Kabum": "https://www.kabum.com.br/produto/505794",
             "Pichau": "https://pichau.com.br/placa-mae-gigabyte-b650m-d3hp-ddr5-socket-am5-m-atx-chipset-amd-b650-b650m-d3hp",
@@ -120,8 +128,8 @@ LISTA_DE_PRODUTOS = [
     # --- NOVOS PRODUTOS (Monitores) ---
     # Não afiliado
     {
-        "nome_base": "Monitor Gamer LG UltraGear 24' 180Hz",
-        "categoria": "Monitor",
+        "nome_base": "Monitor Gamer LG UltraGear 24' 180Hz".strip(),
+        "categoria": "Monitor".strip(),
         "urls": {
             "Kabum": "https://www.kabum.com.br/produto/614879",
             "Pichau": "https://pichau.com.br/monitor-gamer-lg-24-pol-ips-fhd-1ms-180hz-freesync-g-sync-hdmi-dp-24gs60f-b-awzm",
@@ -132,8 +140,8 @@ LISTA_DE_PRODUTOS = [
     # --- NOVOS PRODUTOS (Fontes / PSU) ---
     # Não afiliado
     {
-        "nome_base": "Fonte Cooler Master Mwe Gold 750 V3 Atx 3.1 80 Plus Gold",
-        "categoria": "Fonte de Alimentação",
+        "nome_base": "Fonte Cooler Master Mwe Gold 750 V3 Atx 3.1 80 Plus Gold".strip(),
+        "categoria": "Fonte de Alimentação".strip(),
         "urls": {
             "Kabum": "https://www.kabum.com.br/produto/923379",
             "Pichau": "https://pichau.com.br/fonte-cooler-master-mwe-gold-750-v3-750w-atx-3-1-80-plus-gold-preto-mpe-7506-acag-bbr",
@@ -141,31 +149,17 @@ LISTA_DE_PRODUTOS = [
         }
     },
 ]
+
 # --- HEADERS ---
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
     'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
 }
-
 s = requests.Session()
 s.headers.update(HEADERS)
 
-print("Iniciando o navegador Selenium (headless)...")
-chrome_options = Options()
-chrome_options.add_argument("--headless") 
-chrome_options.add_argument(f"user-agent={HEADERS['User-Agent']}")
-chrome_options.add_argument("--disable-gpu")
-chrome_options.add_argument("window-size=1920x1080")
-
-try:
-    service = Service(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service, options=chrome_options)
-    print("Navegador Selenium iniciado com sucesso.")
-except Exception as e:
-    print(f"ERRO: Falha ao iniciar o Selenium/WebDriver.")
-    print(f"Verifique sua conexão ou instalação do Chrome. Erro: {e}")
-    exit()
+# --- DRIVER GLOBAL REMOVIDO ---
 
 def limpar_preco(texto_preco):
     if not texto_preco: return None
@@ -176,10 +170,9 @@ def limpar_preco(texto_preco):
     except ValueError:
         return None
 
-# ... (Funções buscar_dados_kabum, buscar_dados_pichau, buscar_dados_terabyte, get_selenium_soup, buscar_dados_loja permanecem EXATAMENTE IGUAIS) ...
-
 def buscar_dados_kabum(url, soup):
     nome_produto, preco_produto, imagem_url = None, None, None
+    descricao_html = None # <-- NOVO
     try:
         tag_nome = soup.find('h1', class_="text-black-800")
         if tag_nome: nome_produto = tag_nome.text.strip()
@@ -195,6 +188,16 @@ def buscar_dados_kabum(url, soup):
                 print("  -> [Kabum] Status: Produto Esgotado")
                 preco_produto = 0.0
             else: print("  -> [Kabum] ALERTA: Preço/Esgotado não encontrado.")
+            
+        # --- LÓGICA DA DESCRIÇÃO ---
+        tag_descricao = soup.find('div', id='description')
+        if tag_descricao:
+            descricao_html = str(tag_descricao) # Salva o HTML bruto
+            print("  -> [Kabum] Descrição encontrada!")
+        else:
+            print("  -> [Kabum] ALERTA: Descrição não encontrada.")
+        # --- FIM DA LÓGICA ---
+
         tag_imagem = soup.select_one('img[src*="/produtos/fotos/"][src$="_gg.jpg"]')
         if tag_imagem is None:
             tag_imagem = soup.select_one('img[src*="/produtos/fotos/sync_mirakl/"][src*="/xlarge/"]')
@@ -203,10 +206,11 @@ def buscar_dados_kabum(url, soup):
             if imagem_url: print("  -> [Kabum] Imagem encontrada!")
     except Exception as e:
         print(f"  -> [Kabum] Exceção ao extrair dados: {e}")
-    return nome_produto, preco_produto, imagem_url
+    return nome_produto, preco_produto, imagem_url, descricao_html # <-- MUDANÇA
 
 def buscar_dados_pichau(url, soup):
     nome_produto, preco_produto, imagem_url = None, None, None
+    descricao_html = None # <-- NOVO
     try:
         tag_nome = soup.find('h1', class_="mui-1ri6pu6-product_info_title")
         if tag_nome:
@@ -224,46 +228,219 @@ def buscar_dados_pichau(url, soup):
                 preco_produto = 0.0
             else:
                 print("  -> [Pichau] ALERTA: Preço/Esgotado não encontrado.")
+                
+        # --- LÓGICA DA DESCRIÇÃO ---
+        tag_descricao = soup.find('div', attrs={'data-testid': 'description'})
+        if tag_descricao:
+            descricao_html = str(tag_descricao) # Salva o HTML bruto
+            print("  -> [Pichau] Descrição encontrada!")
+        else:
+            print("  -> [Pichau] ALERTA: Descrição não encontrada.")
+        # --- FIM DA LÓGICA ---
+                
         tag_imagem = soup.find('img', class_="iiz__img")
         if tag_imagem:
             imagem_url = tag_imagem.get('src')
             if imagem_url: print("  -> [Pichau] Imagem encontrada!")
     except Exception as e:
         print(f"  -> [Pichau] Exceção ao extrair dados: {e}")
-    return nome_produto, preco_produto, imagem_url
+    return nome_produto, preco_produto, imagem_url, descricao_html # <-- MUDANÇA
 
 def buscar_dados_terabyte(url, soup):
     nome_produto, preco_produto, imagem_url = None, None, None
+    descricao_html = None # <-- NOVO
     try:
-        tag_nome = soup.find('h1', class_="tit-prod")
+        # --- 1. TENTATIVA DE NOME ---
+        tag_nome = soup.find('h1', class_="tit-prod") # Seletor antigo
+        if not tag_nome:
+            tag_nome = soup.find('h1') # Seletor de fallback genérico
+            if tag_nome:
+                print("  -> [Terabyte] AVISO: Seletor 'tit-prod' falhou. Usando tag <h1> genérica.")
+            else:
+                print("  -> [Terabyte] ALERTA: Tag <h1> do nome não encontrada.")
         if tag_nome:
             nome_produto = tag_nome.text.strip()
+            
+        # --- 2. TENTATIVA DE ESGOTADO ---
+        tag_esgotado = soup.find(lambda tag: tag.name == 'h2' and 'Produto Indisponível' in tag.text)
+        if not tag_esgotado:
+            tag_avise_me = soup.find('div', id="avise-me-container")
+            if tag_avise_me and (not tag_avise_me.get('style') or 'display: none' not in tag_avise_me.get('style')):
+                 print("  -> [Terabyte] AVISO: Usando 'avise-me-container' para Esgotado.")
+                 tag_esgotado = tag_avise_me
+        if not tag_esgotado:
+             tag_avise_me_btn = soup.find('button', id="btn-avise-me")
+             if tag_avise_me_btn:
+                 print("  -> [Terabyte] AVISO: Usando 'btn-avise-me' para Esgotado.")
+                 tag_esgotado = tag_avise_me_btn
+        if not tag_esgotado:
+             tag_notify_me = soup.find('div', class_='notify-me-wrapper')
+             if tag_notify_me:
+                 print("  -> [Terabyte] AVISO: Usando 'notify-me-wrapper' para Esgotado.")
+                 tag_esgotado = tag_notify_me
+
+        if tag_esgotado:
+            print("  -> [Terabyte] Status: Produto Esgotado.")
+            preco_produto = 0.0
         else:
-            print("  -> [Terabyte] Tag <h1> do nome não encontrada (class='tit-prod').")
-        tag_preco = soup.find('p', id="valVista")
-        if tag_preco:
-            preco_produto = limpar_preco(tag_preco.text)
-            print(f"  -> [Terabyte] Status: Disponível! Preço: R$ {preco_produto}")
-        else:
-            tag_esgotado = soup.find(lambda tag: tag.name == 'h2' and 'Produto Indisponível' in tag.text)
-            if tag_esgotado:
-                print("  -> [Terabyte] Status: Produto Esgotado.")
-                preco_produto = 0.0
+            # --- 3. TENTATIVA DE PREÇO ---
+            tag_preco = soup.find('p', id="valVista")
+            if not tag_preco:
+                print("  -> [Terabyte] AVISO: Seletor 'valVista' não encontrado. Tentando fallback 'span.price'...")
+                bloco_part_price = soup.find('div', class_="part-price")
+                if bloco_part_price and 'à vista' in bloco_part_price.text.lower():
+                    tag_preco = bloco_part_price.find('span', class_='price')
+                    if tag_preco:
+                        print("  -> [Terabyte] Sucesso! Encontrado preço 'à vista' no fallback 1.")
+            if not tag_preco:
+                print("  -> [Terabyte] AVISO: Fallback 1 falhou. Tentando fallback 'product-price'...")
+                tag_preco = soup.find('span', class_='product-price')
+                if tag_preco:
+                     print("  -> [Terabyte] Sucesso! Encontrado preço no fallback 2.")
+            if not tag_preco:
+                print("  -> [Terabyte] AVISO: Fallback 2 falhou. Tentando fallback 'price-payment-slip'...")
+                tag_preco = soup.find('span', class_='price-payment-slip')
+                if tag_preco:
+                     print("  -> [Terabyte] Sucesso! Encontrado preço no fallback 3 (monitores).")
+
+            if tag_preco:
+                preco_produto = limpar_preco(tag_preco.text)
+                if preco_produto == 0.0:
+                    print(f"  -> [Terabyte] Status: Preço R$ 0,00 encontrado, tratando como Esgotado.")
+                    preco_produto = 0.0
+                else:
+                    print(f"  -> [Terabyte] Status: Disponível! Preço: R$ {preco_produto}")
             else:
-                print("  -> [Terabyte] ALERTA: Preço/Esgotado não encontrado.")
-        tag_imagem = soup.find('img', class_="zoomImg")
+                print("  -> [Terabyte] ALERTA: Preço/Esgotado não encontrado. (Página pode ter mudado)")
+
+        # --- LÓGICA DA DESCRIÇÃO ---
+        tag_descricao = soup.find('div', id='especificacoes')
+        if not tag_descricao:
+            tag_descricao = soup.find('div', id='descricao')
+        if tag_descricao:
+            descricao_html = str(tag_descricao) # Salva o HTML bruto
+            print("  -> [Terabyte] Descrição encontrada!")
+        else:
+            print("  -> [Terabyte] ALERTA: Descrição não encontrada.")
+        # --- FIM DA LÓGICA ---
+
+        # --- 4. TENTATIVA DE IMAGEM ---
+        tag_imagem = soup.find('img', class_="zoomImg") 
+        if not tag_imagem:
+            tag_imagem = soup.select_one("div.easyzoom img") 
+        if not tag_imagem:
+             tag_imagem = soup.select_one("img#pImg") 
+        if not tag_imagem:
+            img_container = soup.find('div', class_='product-image')
+            if img_container:
+                tag_imagem = img_container.find('img')
+                if tag_imagem:
+                     print("  -> [Terabyte] AVISO: Usando 'product-image' de fallback para imagem.")
+        if not tag_imagem:
+            img_container = soup.find('figure', class_='mz-figure')
+            if img_container:
+                tag_imagem = img_container.find('img')
+                if tag_imagem:
+                     print("  -> [Terabyte] AVISO: Usando 'mz-figure' de fallback para imagem.")
+        
         if tag_imagem:
             imagem_url = tag_imagem.get('src')
             if imagem_url: print("  -> [Terabyte] Imagem encontrada!")
+        else:
+             print("  -> [Terabyte] ALERTA: Imagem não encontrada.")
+
     except Exception as e:
         print(f"  -> [Terabyte] Exceção ao extrair dados: {e}")
-    return nome_produto, preco_produto, imagem_url
+        traceback.print_exc() 
+        
+    return nome_produto, preco_produto, imagem_url, descricao_html # <-- MUDANÇA
+# --- FIM DA FUNÇÃO ---
 
-def get_selenium_soup(url):
+# --- INÍCIO DA FUNÇÃO (v10.21 - Otimizado) ---
+def get_selenium_soup(url, loja):
+    
+    driver = None # Inicia o driver como Nulo
+    
     try:
+        # --- 1. CRIAR O NAVEGADOR ---
+        print("  -> [Selenium] Iniciando nova sessão de navegador (Stealth)...")
+        chrome_options = Options()
+        chrome_options.add_argument("--headless=new")
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage") 
+        chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("window-size=1920x1080")
+        chrome_options.add_argument(f"user-agent={HEADERS['User-Agent']}")
+        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        chrome_options.add_experimental_option('useAutomationExtension', False)
+        chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+
+        service = Service(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=chrome_options)
+        
+        print("  -> [Selenium] Aplicando patches 'stealth'...")
+        stealth(driver,
+              languages=["pt-BR", "pt"],
+              vendor="Google Inc.",
+              platform="Win32",
+              webgl_vendor="Intel Inc.",
+              renderer="Intel Iris OpenGL Engine",
+              fix_hairline=True,
+              )
+        print("  -> [Selenium] Patches 'stealth' aplicados.")
+        # --- FIM DA CRIAÇÃO ---
+
+
+        # --- 2. CARREGAR A PÁGINA E APLICAR LÓGICA ---
         driver.get(url)
-        print("  -> [Selenium] Página carregada. Aguardando JavaScript (5s)...")
-        time.sleep(5) 
+        print(f"  -> [Selenium] Página carregada para {loja}. Iniciando lógica...")
+        
+        # --- SUA OTIMIZAÇÃO (3s / 10s) ---
+        wait_for_popup = 3
+        wait_for_content = 10 
+        # --- FIM DA OTIMIZAÇÃO ---
+
+
+        if loja == "Terabyte" or loja == "Pichau": # Aplicar a lógica para ambas
+            # --- ESTÁGIO 1: MATADOR DE POPUP (Sua observação) ---
+            try:
+                print(f"  -> [Selenium] Estágio 1/2: Tentando fechar popup (espera máx {wait_for_popup}s)...")
+                popup_close_button = WebDriverWait(driver, wait_for_popup).until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, 
+                        "button.close, button.modal__close, button[aria-label='Close'], button[aria-label='Fechar'], .close-modal, .btn-close, .fancybox-close, .modal-close"
+                    ))
+                )
+                if popup_close_button:
+                    print("  -> [Selenium] Popup encontrado! Clicando para fechar.")
+                    driver.execute_script("arguments[0].click();", popup_close_button) # Click via JS (mais confiável)
+                    time.sleep(2) # Espera 2s para o popup fechar
+            except Exception as e:
+                print(f"  -> [Selenium] AVISO: Nenhum popup encontrado ou não foi possível fechá-lo (Timeout de {wait_for_popup}s).")
+            # --- FIM DO ESTÁGIO 1 ---
+
+            # --- ESTÁGIO 2: ESPERA INTELIGENTE OTIMIZADA ---
+            print(f"  -> [Selenium] Estágio 2/2: Esperando pelo conteúdo final da página (máx {wait_for_content}s)...")
+            
+            if loja == "Terabyte":
+                WebDriverWait(driver, wait_for_content).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, 
+                        "#valVista, #avise-me-container, #btn-avise-me, .price-payment-slip, .notify-me-wrapper"
+                    ))
+                )
+                print("  -> [Selenium] Elemento da Terabyte (preço ou esgotado) encontrado.")
+            
+            elif loja == "Pichau":
+                WebDriverWait(driver, wait_for_content).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, 
+                        ".mui-1jk88bq-price_vista-extraSpacePriceVista, .mui-1nlpwp-availability-outOfStock"
+                    ))
+                )
+                print("  -> [Selenium] Elemento da Pichau (preço ou esgotado) encontrado.")
+            # --- FIM DO ESTÁGIO 2 ---
+        
+        else:
+            time.sleep(5)
+            
         
         html = driver.page_source
         if "403 Forbidden" in html or "Access denied" in html:
@@ -271,9 +448,19 @@ def get_selenium_soup(url):
              return None
         soup = BeautifulSoup(html, 'lxml')
         return soup
+    
     except Exception as e:
-        print(f"  -> [Selenium] Erro ao carregar a página {url}: {e}")
+        # Se der timeout (elemento não apareceu), vai cair aqui
+        print(f"  -> [Selenium] Erro/Timeout ao esperar pelo conteúdo da página {url}. Erro: {e}")
         return None
+        
+    finally:
+        # --- 3. DESTRUIR O NAVEGADOR ---
+        if driver:
+            print("  -> [Selenium] Fechando sessão do navegador...")
+            driver.quit()
+        # --- FIM DA DESTRUIÇÃO ---
+# --- FIM DA FUNÇÃO CORRIGIDA ---
 
 def buscar_dados_loja(url, loja):
     print(f"  Acessando {loja}: {url[:50]}...")
@@ -282,55 +469,61 @@ def buscar_dados_loja(url, loja):
             response = s.get(url, timeout=15)
             response.raise_for_status()
             soup = BeautifulSoup(response.content, 'lxml')
-            return buscar_dados_kabum(url, soup)
+            return buscar_dados_kabum(url, soup) # Retorna 4 valores
         
         elif loja == "Pichau" or loja == "Terabyte":
-            soup = get_selenium_soup(url)
+            soup = get_selenium_soup(url, loja) # Esta função agora abre e fecha o driver
+            
             if not soup:
                 print(f"  -> Falha ao obter HTML do Selenium para {loja}.")
-                return None, None, None
+                return None, None, None, None # <-- MUDANÇA
             if loja == "Pichau":
-                return buscar_dados_pichau(url, soup)
+                return buscar_dados_pichau(url, soup) # Retorna 4 valores
             elif loja == "Terabyte":
-                return buscar_dados_terabyte(url, soup)
+                return buscar_dados_terabyte(url, soup) # Retorna 4 valores
         else:
             print(f"  -> Loja '{loja}' não suportada.")
-            return None, None, None
+            return None, None, None, None # <-- MUDANÇA
     except requests.exceptions.HTTPError as err:
         print(f"  -> Erro HTTP [requests] ao acessar {loja}: {err}")
     except requests.exceptions.RequestException as e:
         print(f"  -> Erro de conexão [requests] ao acessar {loja}: {e}")
     except Exception as e:
         print(f"  -> Exceção GERAL ao processar {loja} ({url[:50]}...): {e}")
-    return None, None, None
-# --- Fim das funções de busca ---
+    return None, None, None, None # <-- MUDANÇA
 
-
-# --- O PROGRAMA PRINCIPAL (v10.1) ---
-print(f"--- INICIANDO MONITOR DE PREÇOS (v10.1 - Com Categoria) ---")
+# --- O PROGRAMA PRINCIPAL (v10.22) ---
+print(f"--- INICIANDO MONITOR DE PREÇOS (v10.22 - Adicionando Descrição) ---")
 
 resultados_de_hoje = []
 timestamp_agora = datetime.now()
 
 for produto_base_info in LISTA_DE_PRODUTOS:
-    nome_base = produto_base_info["nome_base"]
-    categoria = produto_base_info["categoria"] # <--- MUDANÇA AQUI
+    nome_base = produto_base_info["nome_base"].strip()
+    categoria = produto_base_info["categoria"].strip() 
     print(f"\nBuscando: {nome_base} (Categoria: {categoria})")
     
     for loja, url_loja in produto_base_info["urls"].items():
+        if not url_loja or url_loja.strip() == "":
+            print(f" Pulando loja: {loja} (URL não fornecida)")
+            continue
+            
         print(f" Tentando loja: {loja}")
-        nome_raspado, preco_raspado, imagem_raspada = buscar_dados_loja(url_loja, loja)
+        # --- MUDANÇA AQUI ---
+        nome_raspado, preco_raspado, imagem_raspada, descricao_raspada = buscar_dados_loja(url_loja, loja)
+        # --- FIM DA MUDANÇA ---
+        
         if nome_raspado and preco_raspado is not None:
-            # --- MUDANÇA AQUI ---
             resultados_de_hoje.append({
                 "timestamp": timestamp_agora,
                 "produto_base": nome_base, 
-                "categoria": categoria, # <-- ADICIONADO
+                "categoria": categoria, 
                 "nome_completo_raspado": nome_raspado,
                 "preco": preco_raspado,
                 "imagem_url": imagem_raspada if imagem_raspada else "",
                 "loja": loja, 
-                "url": url_loja
+                "url": url_loja,
+                "descricao": descricao_raspada if descricao_raspada else "" # <-- NOVO
             })
         else:
             print(f"  -> Falha ao salvar dados de {nome_base} na loja {loja}.")
@@ -340,12 +533,12 @@ for produto_base_info in LISTA_DE_PRODUTOS:
 
 print("\nBusca concluída.")
 
-# --- LÓGICA PARA SALVAR NO BANCO DE DADOS ---
 if resultados_de_hoje:
     try:
         df_hoje = pd.DataFrame(resultados_de_hoje)
         # --- MUDANÇA AQUI ---
-        colunas_ordenadas = ["timestamp", "produto_base", "categoria", "nome_completo_raspado", "preco", "imagem_url", "loja", "url"]
+        colunas_ordenadas = ["timestamp", "produto_base", "categoria", "nome_completo_raspado", "preco", "imagem_url", "loja", "url", "descricao"]
+        # --- FIM DA MUDANÇA ---
         df_hoje = df_hoje.reindex(columns=colunas_ordenadas)
 
         DATABASE_URL = os.environ.get('DATABASE_URL')
@@ -360,9 +553,6 @@ if resultados_de_hoje:
                 
             engine = create_engine(DATABASE_URL)
             
-            # if_exists='append' vai adicionar as novas linhas.
-            # O Pandas/SQLAlchemy é inteligente o suficiente para adicionar a nova coluna 'categoria'
-            # à tabela 'precos' se ela não existir.
             df_hoje.to_sql('precos', con=engine, if_exists='append', index=False)
             
             print(f"Sucesso! {len(df_hoje)} registros foram salvos no banco de dados na tabela 'precos'.")
@@ -375,7 +565,4 @@ else:
     print("Nenhum dado foi coletado hoje.")
 
 
-print("\nFechando o navegador Selenium...")
-driver.quit() 
-
-print("--- FIM DA EXECUÇÃO ---")
+print("\n--- FIM DA EXECUÇÃO ---")
