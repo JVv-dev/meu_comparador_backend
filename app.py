@@ -1,4 +1,4 @@
-# meu_comparador_backend/app.py (v11.0 - Rota de Produto Único)
+# meu_comparador_backend/app.py (v11.2 - Lógica de Descrição Corrigida)
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -52,7 +52,6 @@ def get_dados_do_db():
         df['categoria'] = df['categoria'].fillna('Eletrônicos')
 
         # --- MUDANÇA: Limpa os dados do banco na leitura ---
-        # Isso corrige o bug dos espaços em branco (ex: " RTX 3060 ")
         df['produto_base'] = df['produto_base'].str.strip()
         df['categoria'] = df['categoria'].str.strip()
         if 'descricao' not in df.columns:
@@ -71,7 +70,7 @@ def get_dados_do_db():
 # Rota de teste
 @app.route('/', methods=['GET'])
 def home():
-    return jsonify({"message": "API de Comparador de Produtos (v11.0 - SEO) está funcionando!"}), 200
+    return jsonify({"message": "API de Comparador de Produtos (v11.2 - Lógica de Descrição Corrigida) está funcionando!"}), 200
 
 # Rota de saúde
 @app.route('/health', methods=['GET'])
@@ -227,6 +226,33 @@ def get_single_product(product_base_name):
         lojas = []
         df_lojas_recentes = group.loc[group.groupby('loja')['timestamp'].idxmax()]
 
+        # --- INÍCIO DA CORREÇÃO (v11.2 - Lógica da Descrição) ---
+        
+        # 1. Pega a descrição da loja principal (menor preço)
+        descricao_final = produto_principal.get('descricao', '')
+
+        # 2. Se a loja principal (ex: Pichau) não tiver descrição,
+        #    tenta pegar a da Kabum (que sempre tem).
+        if not descricao_final or not descricao_final.strip():
+            print(f"AVISO: Produto '{product_name_limpo}' está sem descrição na loja principal ({produto_principal['loja']}). Procurando fallback...")
+            
+            # Itera em todas as lojas desse produto
+            for _, loja_row in df_lojas_recentes.iterrows():
+                if loja_row['loja'] == 'Kabum' and loja_row.get('descricao'):
+                    descricao_final = loja_row['descricao']
+                    print("  -> Usando descrição da Kabum como fallback.")
+                    break
+            
+            # 3. Se ainda não achou, pega qualquer uma
+            if not descricao_final or not descricao_final.strip():
+                 for desc in group['descricao']:
+                    if desc and desc.strip():    
+                        descricao_final = desc
+                        print("  -> Usando a primeira descrição não-nula encontrada como fallback.")
+                        break
+        
+        # --- FIM DA CORREÇÃO ---
+
         for _, loja_info in df_lojas_recentes.iterrows():
             lojas.append({
                 "name": loja_info['loja'],
@@ -238,11 +264,6 @@ def get_single_product(product_base_name):
                 "affiliateLink": loja_info['url'],
                 "inStock": loja_info['preco'] > 0 and not pd.isna(loja_info['preco'])
             })
-        primeira_descricao_encontrada = ""
-        for desc in group['descricao']:
-            if desc and desc.strip():    
-                primeira_descricao_encontrada = desc
-                break
 
         historico_df = group.sort_values('timestamp')[['timestamp', 'preco', 'loja']].drop_duplicates()
         historico_formatado = []
@@ -262,7 +283,7 @@ def get_single_product(product_base_name):
             "priceHistory": historico_formatado,
             "precoMinimoHistorico": preco_min_historico, 
             "precoMedioHistorico": preco_medio_historico,
-            "descricao": primeira_descricao_encontrada
+            "descricao": descricao_final # <-- Variável corrigida
         }
         
         print(f"Retornando dados formatados para: {product_name_limpo}")

@@ -1,4 +1,4 @@
-# meu_comparador_backend/scraper.py (v10.22 - Adicionando Descrição)
+# meu_comparador_backend/scraper.py (v10.25 - Correção Imagens Pichau)
 
 import requests
 from bs4 import BeautifulSoup
@@ -189,7 +189,7 @@ def buscar_dados_kabum(url, soup):
                 preco_produto = 0.0
             else: print("  -> [Kabum] ALERTA: Preço/Esgotado não encontrado.")
             
-        # --- LÓGICA DA DESCRIÇÃO ---
+        # --- LÓGICA DA DESCRIÇÃO (v10.22 - Mantida, pois funcionou) ---
         tag_descricao = soup.find('div', id='description')
         if tag_descricao:
             descricao_html = str(tag_descricao) # Salva o HTML bruto
@@ -229,11 +229,17 @@ def buscar_dados_pichau(url, soup):
             else:
                 print("  -> [Pichau] ALERTA: Preço/Esgotado não encontrado.")
                 
-        # --- LÓGICA DA DESCRIÇÃO ---
-        tag_descricao = soup.find('div', attrs={'data-testid': 'description'})
+        # --- LÓGICA DA DESCRIÇÃO (v10.25 - CORREÇÃO PICHAU) ---
+        # Usa o seletor de classe que você encontrou:
+        tag_descricao = soup.find('div', class_="description-rich-text-product")
+        
         if tag_descricao:
+            # MUDANÇA: SÓ remover o <link>, mas MANTER o <style>
+            for link_tag in tag_descricao.find_all('link'):
+                link_tag.decompose()
+                
             descricao_html = str(tag_descricao) # Salva o HTML bruto
-            print("  -> [Pichau] Descrição encontrada!")
+            print("  -> [Pichau] Descrição encontrada (com styles)!")
         else:
             print("  -> [Pichau] ALERTA: Descrição não encontrada.")
         # --- FIM DA LÓGICA ---
@@ -251,9 +257,9 @@ def buscar_dados_terabyte(url, soup):
     descricao_html = None # <-- NOVO
     try:
         # --- 1. TENTATIVA DE NOME ---
-        tag_nome = soup.find('h1', class_="tit-prod") # Seletor antigo
+        tag_nome = soup.find('h1', class_="tit-prod") 
         if not tag_nome:
-            tag_nome = soup.find('h1') # Seletor de fallback genérico
+            tag_nome = soup.find('h1') 
             if tag_nome:
                 print("  -> [Terabyte] AVISO: Seletor 'tit-prod' falhou. Usando tag <h1> genérica.")
             else:
@@ -313,11 +319,15 @@ def buscar_dados_terabyte(url, soup):
             else:
                 print("  -> [Terabyte] ALERTA: Preço/Esgotado não encontrado. (Página pode ter mudado)")
 
-        # --- LÓGICA DA DESCRIÇÃO ---
-        tag_descricao = soup.find('div', id='especificacoes')
-        if not tag_descricao:
-            tag_descricao = soup.find('div', id='descricao')
+        # --- LÓGICA DA DESCRIÇÃO (v10.24 - CORREÇÃO TERABYTE) ---
+        # Usa o seletor de classe que você encontrou:
+        tag_descricao = soup.find('div', class_='descricao')
+        
         if tag_descricao:
+            # Limpa os divs "clear" que não precisamos
+            for clear_tag in tag_descricao.find_all('div', class_='clear'):
+                clear_tag.decompose()
+
             descricao_html = str(tag_descricao) # Salva o HTML bruto
             print("  -> [Terabyte] Descrição encontrada!")
         else:
@@ -492,8 +502,8 @@ def buscar_dados_loja(url, loja):
         print(f"  -> Exceção GERAL ao processar {loja} ({url[:50]}...): {e}")
     return None, None, None, None # <-- MUDANÇA
 
-# --- O PROGRAMA PRINCIPAL (v10.22) ---
-print(f"--- INICIANDO MONITOR DE PREÇOS (v10.22 - Adicionando Descrição) ---")
+# --- O PROGRAMA PRINCIPAL (v10.25) ---
+print(f"--- INICIANDO MONITOR DE PREÇOS (v10.25 - Correção Imagens Pichau) ---")
 
 resultados_de_hoje = []
 timestamp_agora = datetime.now()
