@@ -229,6 +229,7 @@ def get_single_product(product_base_name):
         # --- INÍCIO DA CORREÇÃO (v11.2 - Lógica da Descrição) ---
         
         # 1. Pega a descrição da loja principal (menor preço)
+        # .get() é mais seguro caso a coluna 'descricao' não exista por algum motivo
         descricao_final = produto_principal.get('descricao', '')
 
         # 2. Se a loja principal (ex: Pichau) não tiver descrição,
