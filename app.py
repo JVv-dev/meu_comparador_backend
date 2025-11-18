@@ -1,4 +1,4 @@
-# meu_comparador_backend/app.py (v11.2 - Lógica de Descrição Corrigida)
+# meu_comparador_backend/app.py (v11.3 - Lógica de Descrição CORRIGIDA)
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -27,6 +27,9 @@ def get_dados_do_db():
             
         engine = create_engine(DATABASE_URL)
         
+        # Otimização: Não puxe a tabela inteira se ela for gigante.
+        # Vamos puxar apenas dados das últimas 24h (ou o suficiente para ter 1 de cada loja)
+        # Por enquanto, vamos manter o SELECT * pois a tabela é pequena.
         df = pd.read_sql("SELECT * FROM precos", engine)
         
         if df.empty:
@@ -70,7 +73,7 @@ def get_dados_do_db():
 # Rota de teste
 @app.route('/', methods=['GET'])
 def home():
-    return jsonify({"message": "API de Comparador de Produtos (v11.2 - Lógica de Descrição Corrigida) está funcionando!"}), 200
+    return jsonify({"message": "API de Comparador de Produtos (v11.3 - Lógica de Descrição Corrigida) está funcionando!"}), 200
 
 # Rota de saúde
 @app.route('/health', methods=['GET'])
@@ -98,13 +101,17 @@ def get_products():
         # Agrupa pelos nomes de produto já limpos
         for nome_base, group in df_dados.groupby('produto_base'):
             try:
-                group_valido = group[group['preco'] > 0]
+                # Pega apenas os dados mais recentes de cada loja
+                df_lojas_recentes = group.loc[group.groupby('loja')['timestamp'].idxmax()]
+
+                group_valido = df_lojas_recentes[df_lojas_recentes['preco'] > 0]
+                
                 if not group_valido.empty:
                     produto_principal = group_valido.loc[group_valido['preco'].idxmin()]
                 else:
-                    produto_principal = group.sort_values(by='timestamp', ascending=False).iloc[0]
+                    produto_principal = df_lojas_recentes.sort_values(by='timestamp', ascending=False).iloc[0]
 
-                precos_historicos_validos = group[group['preco'] > 0]['preco']
+                precos_historicos_validos = group[group['preco'] > 0]['preco'] # Histórico usa 'group' (correto)
                 preco_min_historico = 0.0
                 preco_medio_historico = 0.0
 
@@ -113,8 +120,6 @@ def get_products():
                     preco_medio_historico = float(precos_historicos_validos.mean())
 
                 lojas = []
-                df_lojas_recentes = group.loc[group.groupby('loja')['timestamp'].idxmax()]
-
                 for _, loja_info in df_lojas_recentes.iterrows():
                     lojas.append({
                         "name": loja_info['loja'],
@@ -199,61 +204,49 @@ def get_single_product(product_base_name):
         return jsonify({"error": "Não foi possível carregar os dados."}), 500
 
     # Filtra o DataFrame (coluna 'produto_base' já foi limpa pelo get_dados_do_db)
-    df_produto = df_dados[df_dados['produto_base'] == product_name_limpo].copy()
+    group = df_dados[df_dados['produto_base'] == product_name_limpo].copy()
 
-    if df_produto.empty:
+    if group.empty:
         print(f"Produto '{product_name_limpo}' não encontrado no banco de dados.")
         return jsonify({"error": "Produto não encontrado"}), 404
 
-    # --- Reutiliza a lógica de formatação de '/api/products' ---
     try:
-        group = df_produto 
+        # --- INÍCIO DA LÓGICA CORRIGIDA (v11.3) ---
         
-        group_valido = group[group['preco'] > 0]
-        if not group_valido.empty:
-            produto_principal = group_valido.loc[group_valido['preco'].idxmin()]
-        else:
-            produto_principal = group.sort_values(by='timestamp', ascending=False).iloc[0]
-
-        precos_historicos_validos = group[group['preco'] > 0]['preco']
-        preco_min_historico = 0.0
-        preco_medio_historico = 0.0
-
-        if not precos_historicos_validos.empty:
-            preco_min_historico = float(precos_historicos_validos.min())
-            preco_medio_historico = float(precos_historicos_validos.mean())
-
-        lojas = []
+        # 1. Pega as entradas MAIS RECENTES de cada loja para este produto
         df_lojas_recentes = group.loc[group.groupby('loja')['timestamp'].idxmax()]
-
-        # --- INÍCIO DA CORREÇÃO (v11.2 - Lógica da Descrição) ---
         
-        # 1. Pega a descrição da loja principal (menor preço)
-        # .get() é mais seguro caso a coluna 'descricao' não exista por algum motivo
-        descricao_final = produto_principal.get('descricao', '')
+        # 2. Encontra a loja principal (menor preço) DENTRE AS RECENTES
+        group_valido = df_lojas_recentes[df_lojas_recentes['preco'] > 0]
+        
+        if not group_valido.empty:
+            # Pega a LINHA INTEIRA do produto com o menor preço recente
+            produto_principal_row = group_valido.loc[group_valido['preco'].idxmin()]
+        else:
+            # Se todos estão esgotados, pega o mais recente de qualquer jeito
+            produto_principal_row = df_lojas_recentes.sort_values(by='timestamp', ascending=False).iloc[0]
 
-        # 2. Se a loja principal (ex: Pichau) não tiver descrição,
-        #    tenta pegar a da Kabum (que sempre tem).
+        # 3. Pega a descrição DA LOJA PRINCIPAL (a de menor preço)
+        descricao_final = produto_principal_row.get('descricao', '')
+
+        # 4. Se a loja principal (ex: Pichau) não tiver descrição (porque o scraper falhou),
+        #    tenta pegar a da Kabum (que sempre tem) como fallback.
         if not descricao_final or not descricao_final.strip():
-            print(f"AVISO: Produto '{product_name_limpo}' está sem descrição na loja principal ({produto_principal['loja']}). Procurando fallback...")
-            
-            # Itera em todas as lojas desse produto
-            for _, loja_row in df_lojas_recentes.iterrows():
-                if loja_row['loja'] == 'Kabum' and loja_row.get('descricao'):
-                    descricao_final = loja_row['descricao']
+            print(f"AVISO: Produto '{product_name_limpo}' está sem descrição na loja principal ({produto_principal_row['loja']}). Procurando fallback...")
+            try:
+                # Tenta pegar a descrição da linha específica da Kabum
+                descricao_kabum = df_lojas_recentes.loc[df_lojas_recentes['loja'] == 'Kabum', 'descricao'].iloc[0]
+                if descricao_kabum and descricao_kabum.strip():
+                    descricao_final = descricao_kabum
                     print("  -> Usando descrição da Kabum como fallback.")
-                    break
-            
-            # 3. Se ainda não achou, pega qualquer uma
-            if not descricao_final or not descricao_final.strip():
-                 for desc in group['descricao']:
-                    if desc and desc.strip():    
-                        descricao_final = desc
-                        print("  -> Usando a primeira descrição não-nula encontrada como fallback.")
-                        break
+            except Exception:
+                # Se não houver Kabum ou der erro, apenas continua (descricao_final = "")
+                print("  -> Fallback da Kabum não encontrado.")
         
         # --- FIM DA CORREÇÃO ---
 
+        # 5. Monta a lista de lojas (com base nas recentes)
+        lojas = []
         for _, loja_info in df_lojas_recentes.iterrows():
             lojas.append({
                 "name": loja_info['loja'],
@@ -265,6 +258,15 @@ def get_single_product(product_base_name):
                 "affiliateLink": loja_info['url'],
                 "inStock": loja_info['preco'] > 0 and not pd.isna(loja_info['preco'])
             })
+            
+        # 6. Pega dados do histórico (do 'group' completo, o que está correto)
+        precos_historicos_validos = group[group['preco'] > 0]['preco']
+        preco_min_historico = 0.0
+        preco_medio_historico = 0.0
+
+        if not precos_historicos_validos.empty:
+            preco_min_historico = float(precos_historicos_validos.min())
+            preco_medio_historico = float(precos_historicos_validos.mean())
 
         historico_df = group.sort_values('timestamp')[['timestamp', 'preco', 'loja']].drop_duplicates()
         historico_formatado = []
@@ -275,16 +277,17 @@ def get_single_product(product_base_name):
                 "loja": row['loja']
             })
 
+        # 7. Monta a resposta final
         produto_formatado = {
             "id": str(product_name_limpo), 
-            "name": produto_principal['nome_completo_raspado'],
-            "image": produto_principal['imagem_url'],
-            "category": produto_principal['categoria'],
+            "name": produto_principal_row['nome_completo_raspado'], # <-- Usa a linha do produto principal
+            "image": produto_principal_row['imagem_url'], # <-- Usa a linha do produto principal
+            "category": produto_principal_row['categoria'], # <-- Usa a linha do produto principal
             "stores": lojas,
             "priceHistory": historico_formatado,
             "precoMinimoHistorico": preco_min_historico, 
             "precoMedioHistorico": preco_medio_historico,
-            "descricao": descricao_final # <-- Variável corrigida
+            "descricao": descricao_final # <-- Usa a descrição final
         }
         
         print(f"Retornando dados formatados para: {product_name_limpo}")
