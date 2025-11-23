@@ -82,7 +82,7 @@ def get_products():
     except Exception as e: return jsonify({"error": str(e)}), 500
     return jsonify(produtos_formatados)
 
-# --- ROTA DE PRODUTO ÚNICO (PRIORIDADE PICHAU) ---
+# --- ROTA DE PRODUTO ÚNICO (v12.2 - Sem Fallback Kabum) ---
 @app.route('/api/product/<path:product_base_name>', methods=['GET'])
 def get_single_product(product_base_name):
     product_name_limpo = product_base_name.strip()
@@ -95,7 +95,7 @@ def get_single_product(product_base_name):
     if group.empty: return jsonify({"error": "Não encontrado"}), 404
 
     try:
-        # 1. Recentes de cada loja
+        # 1. Recentes
         df_recentes = group.loc[group.groupby('loja')['timestamp'].idxmax()]
         
         # 2. Vencedor do Preço (Capa)
@@ -105,17 +105,17 @@ def get_single_product(product_base_name):
         else:
             principal = df_recentes.sort_values(by='timestamp', ascending=False).iloc[0]
 
-        # 3. --- LÓGICA DA DESCRIÇÃO (HIERARQUIA RÍGIDA) ---
+        # 3. --- LÓGICA DA DESCRIÇÃO ---
         descricao_final = ""
         
-        # Tenta Pichau PRIMEIRO (independente de preço)
+        # Tenta Pichau PRIMEIRO (Prioridade Máxima)
         try:
             pichau_row = df_recentes[df_recentes['loja'] == 'Pichau']
             if not pichau_row.empty:
                 desc = pichau_row.iloc[0]['descricao']
-                if desc and len(str(desc).strip()) > 10: 
+                if desc and len(str(desc).strip()) > 10:
                     descricao_final = desc
-                    print("  -> [Descrição] Usando Pichau (Prioridade Visual).")
+                    print("  -> [Descrição] Usando Pichau.")
         except: pass
 
         # Se não achou Pichau, tenta Terabyte
@@ -126,22 +126,20 @@ def get_single_product(product_base_name):
                     desc = tera_row.iloc[0]['descricao']
                     if desc and len(str(desc).strip()) > 10:
                         descricao_final = desc
-                        print("  -> [Descrição] Usando Terabyte (Visual Secundário).")
+                        print("  -> [Descrição] Usando Terabyte.")
             except: pass
 
-        # Se ainda não achou, usa a do vencedor do preço
+        # Se não achou nenhuma das ricas, usa a do vencedor do preço (SE NÃO FOR KABUM)
         if not descricao_final:
-            descricao_final = principal.get('descricao', '')
-            print(f"  -> [Descrição] Usando Vencedor ({principal['loja']}).")
+            loja_vencedora = principal['loja']
+            # Se a Kabum for a vencedora, a descrição dela virá vazia do banco (pois paramos de coletar)
+            # ou será ignorada se tiver dados antigos.
+            desc_vencedor = principal.get('descricao', '')
+            if desc_vencedor and len(str(desc_vencedor).strip()) > 10:
+                 descricao_final = desc_vencedor
+                 print(f"  -> [Descrição] Usando Vencedor ({loja_vencedora}).")
 
-        # Último recurso: Kabum
-        if not descricao_final:
-             try:
-                kabum_row = df_recentes[df_recentes['loja'] == 'Kabum']
-                if not kabum_row.empty:
-                    descricao_final = kabum_row.iloc[0]['descricao']
-                    print("  -> [Descrição] Fallback Kabum.")
-             except: pass
+        # REMOVIDO: Fallback para Kabum (não existe mais)
         # ------------------------------------------------
 
         # 4. Monta Lojas
