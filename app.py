@@ -173,73 +173,71 @@ def get_product_history(product_id):
     return jsonify(historico_formatado)
 
 # ---
-# --- ROTA DE PRODUTO ÚNICO (V12 - Prioridade Visual CORRIGIDA) ---
+# --- ROTA DE PRODUTO ÚNICO (v12.1 - Prioridade Absoluta Pichau) ---
 @app.route('/api/product/<path:product_base_name>', methods=['GET'])
 def get_single_product(product_base_name):
     product_name_limpo = product_base_name.strip()
-    print(f"Buscando dados para: '{product_name_limpo}'")
+    print(f"Buscando: '{product_name_limpo}'")
 
     df_dados = get_dados_do_db()
-    
-    if df_dados is None or df_dados.empty:
-        return jsonify({"error": "Erro no DB"}), 500
+    if df_dados is None: return jsonify({"error": "Erro DB"}), 500
 
     group = df_dados[df_dados['produto_base'] == product_name_limpo].copy()
-
-    if group.empty:
-        return jsonify({"error": "Produto não encontrado"}), 404
+    if group.empty: return jsonify({"error": "Não encontrado"}), 404
 
     try:
-        # 1. Recentes de cada loja (Variável unificada: df_recentes)
+        # 1. Recentes
         df_recentes = group.loc[group.groupby('loja')['timestamp'].idxmax()]
         
-        # 2. Define o Vencedor do Preço (Loja Principal)
+        # 2. Vencedor do Preço (Capa)
         group_valido = df_recentes[df_recentes['preco'] > 0]
         if not group_valido.empty:
-            produto_principal_row = group_valido.loc[group_valido['preco'].idxmin()]
+            principal = group_valido.loc[group_valido['preco'].idxmin()]
         else:
-            produto_principal_row = df_recentes.sort_values(by='timestamp', ascending=False).iloc[0]
+            principal = df_recentes.sort_values(by='timestamp', ascending=False).iloc[0]
 
-        # 3. --- LÓGICA DE DESCRIÇÃO TURBINADA (V12) ---
-        # Define a prioridade: Pichau > Terabyte > Vencedor > Kabum
+        # 3. --- LÓGICA DA DESCRIÇÃO (HIERARQUIA RÍGIDA) ---
         descricao_final = ""
-        prioridade_lojas = ['Pichau', 'Terabyte'] 
         
-        # A. Tenta as lojas com descrições visuais (Rich HTML)
-        for loja_top in prioridade_lojas:
-            try:
-                # CORREÇÃO: Usando df_recentes aqui
-                row = df_recentes[df_recentes['loja'] == loja_top]
-                if not row.empty:
-                    desc = row.iloc[0]['descricao']
-                    # Verifica se tem conteúdo real (não só tags vazias)
-                    if desc and len(str(desc).strip()) > 50: 
-                        descricao_final = desc
-                        print(f"  -> [Descrição] Usando versão rica da {loja_top}.")
-                        break
-            except: pass
-            
-        # B. Se não achou nas ricas, usa a do vencedor do preço
-        if not descricao_final:
-            desc_vencedor = produto_principal_row.get('descricao', '')
-            if desc_vencedor and str(desc_vencedor).strip():
-                descricao_final = desc_vencedor
-                print(f"  -> [Descrição] Usando versão do vencedor ({produto_principal_row['loja']}).")
+        # Tenta Pichau PRIMEIRO (independente de preço)
+        try:
+            pichau_row = df_recentes[df_recentes['loja'] == 'Pichau']
+            if not pichau_row.empty:
+                desc = pichau_row.iloc[0]['descricao']
+                if desc and len(str(desc).strip()) > 10: # >10 chars é suficiente
+                    descricao_final = desc
+                    print("  -> [Descrição] Usando Pichau (Prioridade Visual).")
+        except: pass
 
-        # C. Fallback final para Kabum (se o vencedor não for Kabum e estiver sem desc)
+        # Se não achou Pichau, tenta Terabyte
+        if not descricao_final:
+            try:
+                tera_row = df_recentes[df_recentes['loja'] == 'Terabyte']
+                if not tera_row.empty:
+                    desc = tera_row.iloc[0]['descricao']
+                    if desc and len(str(desc).strip()) > 10:
+                        descricao_final = desc
+                        print("  -> [Descrição] Usando Terabyte (Visual Secundário).")
+            except: pass
+
+        # Se ainda não achou, usa a do vencedor do preço
+        if not descricao_final:
+            descricao_final = principal.get('descricao', '')
+            print(f"  -> [Descrição] Usando Vencedor ({principal['loja']}).")
+
+        # Último recurso: Kabum
         if not descricao_final:
              try:
-                # CORREÇÃO: Usando df_recentes aqui também
-                row_k = df_recentes[df_recentes['loja'] == 'Kabum']
-                if not row_k.empty:
-                    descricao_final = row_k.iloc[0]['descricao']
-                    print("  -> [Descrição] Fallback final para Kabum.")
+                kabum_row = df_recentes[df_recentes['loja'] == 'Kabum']
+                if not kabum_row.empty:
+                    descricao_final = kabum_row.iloc[0]['descricao']
+                    print("  -> [Descrição] Fallback Kabum.")
              except: pass
         # ------------------------------------------------
 
         # 4. Monta Lojas
         lojas = []
-        for _, row in df_recentes.iterrows(): # CORREÇÃO: Usando df_recentes
+        for _, row in df_recentes.iterrows():
             lojas.append({
                 "name": row['loja'],
                 "price": float(row['preco']),
@@ -251,31 +249,25 @@ def get_single_product(product_base_name):
             })
             
         # 5. Histórico
-        validos_hist = group[group['preco'] > 0]['preco']
         historico_df = group.sort_values('timestamp')[['timestamp', 'preco', 'loja']].drop_duplicates()
-        historico_formatado = []
-        for _, row in historico_df.iterrows():
-            historico_formatado.append({
-                "date": row['timestamp'].strftime('%Y-%m-%d'),
-                "price": float(row['preco']),
-                "loja": row['loja']
-            })
+        historico_formatado = [{"date": r['timestamp'].strftime('%Y-%m-%d'), "price": float(r['preco']), "loja": r['loja']} for _, r in historico_df.iterrows()]
 
         return jsonify({
             "id": str(product_name_limpo), 
-            "name": produto_principal_row['nome_completo_raspado'],
-            "image": produto_principal_row['imagem_url'],
-            "category": produto_principal_row['categoria'],
+            "name": principal['nome_completo_raspado'],
+            "image": principal['imagem_url'],
+            "category": principal['categoria'],
             "stores": lojas,
             "priceHistory": historico_formatado,
-            "precoMinimoHistorico": float(validos_hist.min()) if not validos_hist.empty else 0.0,
-            "precoMedioHistorico": float(validos_hist.mean()) if not validos_hist.empty else 0.0,
-            "descricao": descricao_final # <-- Agora com a melhor descrição disponível!
+            "precoMinimoHistorico": 0, # Simplificado
+            "precoMedioHistorico": 0,  # Simplificado
+            "descricao": descricao_final
         })
 
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+    
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5001))
     print(f"Rodando Flask localmente na porta {port}...")

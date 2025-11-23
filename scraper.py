@@ -1,4 +1,4 @@
-# meu_comparador_backend/scraper.py (v11.0 - Fix Terabyte & Imagens Visíveis)
+# meu_comparador_backend/scraper.py (v11.5 - FULL: Lista Completa + Specs Pichau)
 
 import requests
 from bs4 import BeautifulSoup
@@ -24,48 +24,36 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# --- FUNÇÃO DE LIMPEZA DE HTML (TURBINADA) ---
+# --- FUNÇÃO DE LIMPEZA DE HTML ---
 def corrigir_html_descricao(soup_element, url_base):
-    """
-    1. Transforma data-src em src (Lazy Load).
-    2. Corrige links relativos.
-    3. REMOVE estilos inline que escondem imagens (opacity: 0).
-    """
-    if not soup_element:
-        return ""
+    if not soup_element: return ""
     
-    # Remove tags indesejadas que poluem o visual
-    for tag in soup_element.find_all(['script', 'style', 'iframe', 'link']):
+    # Remove tags inúteis
+    for tag in soup_element.find_all(['script', 'iframe', 'link', 'button', 'input']):
         tag.decompose()
 
-    # Tratamento de Imagens
+    # Corrige Imagens (Lazy Load e Links Relativos)
     for img in soup_element.find_all('img'):
-        # 1. Tenta pegar o link real do lazy load
         new_src = img.get('data-src') or img.get('data-srcset') or img.get('src')
         if new_src:
-            # Se for srcset (vários links), pega o primeiro
             new_src = new_src.split(' ')[0]
-            
-            # 2. Corrige URL relativa
-            if new_src.startswith('/'):
-                new_src = url_base + new_src
-            
+            if new_src.startswith('/'): new_src = url_base + new_src
             img['src'] = new_src
         
-        # 3. REMOVE atributos que podem esconder a imagem ou quebrar layout
-        # (Muitos sites usam style="opacity:0" para lazy load)
-        if img.has_attr('style'): del img['style']
-        if img.has_attr('class'): del img['class']
-        if img.has_attr('width'): del img['width']
-        if img.has_attr('height'): del img['height']
-        if img.has_attr('loading'): del img['loading']
+        # Limpa atributos que escondem a imagem
+        for attr in ['loading', 'width', 'height', 'style', 'class']:
+            if img.has_attr(attr): del img[attr]
         
-        # Adiciona classe do Tailwind para garantir responsividade
-        img['class'] = "w-full h-auto rounded-lg my-4"
+        # Estilo padrão para responsividade
+        img['style'] = "max-width: 100%; height: auto; display: block; margin: 10px auto;"
+
+    # Corrige estilos de texto para ficarem legíveis (remove cores fixas escuras)
+    for tag in soup_element.find_all(style=True):
+        del tag['style'] # Remove estilos inline que podem conflitar com o tema dark/light
 
     return str(soup_element)
 
-# --- LISTA DE ALVOS ---
+# --- LISTA DE ALVOS (SUA LISTA COMPLETA ORIGINAL) ---
 LISTA_DE_PRODUTOS = [
     # --- Nvidia ---
     {
@@ -164,7 +152,6 @@ LISTA_DE_PRODUTOS = [
 
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
 }
 s = requests.Session()
@@ -177,7 +164,8 @@ def limpar_preco(texto_preco):
     try: return float(preco_limpo)
     except ValueError: return None
 
-# --- FUNÇÃO KABUM ---
+# --- FUNÇÕES DE BUSCA POR LOJA ---
+
 def buscar_dados_kabum(url, soup):
     nome, preco, img, desc = None, None, None, None
     try:
@@ -185,113 +173,85 @@ def buscar_dados_kabum(url, soup):
         if tag_nome: nome = tag_nome.text.strip()
         
         tag_preco = soup.find('h4', class_="text-secondary-500") or soup.find('b', class_="text-secondary-500")
-        if tag_preco: 
-            preco = limpar_preco(tag_preco.text)
-            print(f"  -> [Kabum] Preço: R$ {preco}")
-        else:
-            # Verifica esgotado de forma mais ampla
-            if "esgotado" in soup.text.lower() or "indisponível" in soup.text.lower():
-                print("  -> [Kabum] Produto Esgotado (texto detectado)")
-                preco = 0.0
-            else:
-                print("  -> [Kabum] ALERTA: Preço não encontrado (fallback 0.0)")
-                preco = 0.0
+        if tag_preco: preco = limpar_preco(tag_preco.text)
+        else: preco = 0.0
 
         tag_desc = soup.find('div', id='description')
         if tag_desc:
             desc = corrigir_html_descricao(tag_desc, "https://www.kabum.com.br")
-            print("  -> [Kabum] Descrição OK")
 
         tag_img = soup.select_one('img[src*="/produtos/fotos/"][src$="_gg.jpg"]') or soup.select_one('img[src*="/produtos/fotos/sync_mirakl/"][src*="/xlarge/"]')
         if tag_img: img = tag_img.get('src')
 
-    except Exception as e:
-        print(f"  -> [Kabum] Erro: {e}")
+    except Exception as e: print(f"  -> [Kabum] Erro: {e}")
     return nome, preco, img, desc
 
-# --- FUNÇÃO PICHAU ---
 def buscar_dados_pichau(url, soup):
-    nome, preco, img, desc = None, None, None, None
+    nome, preco, img, desc = None, None, None, "" # Descrição começa vazia string
     try:
+        # 1. Nome e Preço (Padrão)
         tag_nome = soup.find('h1')
         if tag_nome: nome = tag_nome.text.strip()
         
-        tag_preco = soup.find('div', class_=lambda x: x and 'price_vista' in x) or soup.find(string=re.compile(r'R\$\s*[\d\.,]+.*vista'))
-        if tag_preco:
-            # Se achou pelo texto (navstring), pega o pai
-            if hasattr(tag_preco, 'parent'): tag_preco = tag_preco.parent
-            preco = limpar_preco(tag_preco.text)
-            print(f"  -> [Pichau] Preço: R$ {preco}")
+        tag_preco = soup.find(string=re.compile(r'R\$\s*[\d\.,]+.*vista'))
+        if tag_preco and hasattr(tag_preco, 'parent'):
+             preco = limpar_preco(tag_preco.parent.text)
         else:
-            if "esgotado" in soup.text.lower() or "indisponível" in soup.text.lower():
-                 print("  -> [Pichau] Esgotado")
-                 preco = 0.0
-            else:
-                 preco = 0.0
+             preco = 0.0
 
-        tag_desc = soup.find('div', class_="description-rich-text-product")
-        if tag_desc:
-            desc = corrigir_html_descricao(tag_desc, "https://www.pichau.com.br")
-            print("  -> [Pichau] Descrição OK")
+        # --- 2. DESCRIÇÃO "SOBRE" (Texto Rico) ---
+        tag_sobre = soup.find('div', class_="description-rich-text-product")
+        if tag_sobre:
+            html_sobre = corrigir_html_descricao(tag_sobre, "https://www.pichau.com.br")
+            desc += f'<div class="mb-8"> <h3 class="text-xl font-bold mb-4">Sobre o Produto</h3> {html_sobre} </div>'
+            print("  -> [Pichau] Seção 'Sobre' encontrada.")
+
+        # --- 3. DESCRIÇÃO "INFORMAÇÕES ADICIONAIS" (Especificações) ---
+        # Procura pelo título "Informações Adicionais"
+        header_specs = soup.find(lambda tag: tag.name in ['h2', 'h3', 'div'] and "INFORMAÇÕES ADICIONAIS" in tag.text.upper())
+        
+        if header_specs:
+            # Pega o pai do header para tentar capturar a tabela
+            parent_container = header_specs.find_parent('div')
+            if parent_container:
+                specs_html = corrigir_html_descricao(parent_container, "https://www.pichau.com.br")
+                desc += f'<div class="mt-8 border-t pt-4"> {specs_html} </div>'
+                print("  -> [Pichau] Seção 'Informações Adicionais' encontrada.")
+        else:
+            # Fallback: Tenta encontrar qualquer tabela grande
+            possible_table = soup.find('div', class_=lambda x: x and ('attributes' in x or 'specifications' in x))
+            if possible_table:
+                 specs_html = corrigir_html_descricao(possible_table, "https://www.pichau.com.br")
+                 desc += f'<div class="mt-8 border-t pt-4"><h3 class="text-xl font-bold mb-4">Especificações</h3> {specs_html} </div>'
+                 print("  -> [Pichau] Tabela de especificações encontrada (fallback).")
 
         tag_img = soup.find('img', class_="iiz__img")
         if tag_img: img = tag_img.get('src')
 
-    except Exception as e:
-        print(f"  -> [Pichau] Erro: {e}")
+    except Exception as e: print(f"  -> [Pichau] Erro: {e}")
+    
+    if not desc: desc = None
     return nome, preco, img, desc
 
-# --- FUNÇÃO TERABYTE (CORRIGIDA/BLINDADA) ---
 def buscar_dados_terabyte(url, soup):
     nome, preco, img, desc = None, None, None, None
     try:
-        # 1. NOME - Tenta classes específicas, depois qualquer H1
         tag_nome = soup.find('h1', class_="tit-prod") or soup.find('h1')
-        if tag_nome: 
-            nome = tag_nome.text.strip()
-        else:
-            print("  -> [Terabyte] CRÍTICO: Nome não encontrado!")
+        if tag_nome: nome = tag_nome.text.strip()
 
-        # 2. PREÇO - Tenta IDs e classes conhecidas
-        tag_preco = soup.find('p', id="valVista") or soup.find('p', class_="val-vista") or soup.find('span', id="valVista")
-        
-        # Fallback: Procura qualquer texto com "R$" e "vista" se o ID falhar
-        if not tag_preco:
-             # Busca div que contenha preço
-             price_container = soup.select_one('div.p-price, div.box-price, div#box-price')
-             if price_container: tag_preco = price_container
+        tag_preco = soup.find('p', id="valVista") or soup.find('div', class_="part-price")
+        if tag_preco: preco = limpar_preco(tag_preco.text)
+        else: preco = 0.0
 
-        if tag_preco:
-            preco = limpar_preco(tag_preco.text)
-            print(f"  -> [Terabyte] Preço: R$ {preco}")
-        else:
-            # Verifica Botões de Indisponível
-            if soup.select_one('#indisponivel, .tbt_esgotado, #btn-avise-me'):
-                print("  -> [Terabyte] Esgotado (botão detectado)")
-                preco = 0.0
-            elif "indisponível" in soup.text.lower():
-                print("  -> [Terabyte] Esgotado (texto detectado)")
-                preco = 0.0
-            else:
-                print("  -> [Terabyte] ALERTA: Preço não encontrado (fallback 0.0)")
-                preco = 0.0
-
-        # 3. DESCRIÇÃO
         tag_desc = soup.find('div', class_='descricao')
         if tag_desc:
-            # Limpa divs vazias que atrapalham
             for clear in tag_desc.find_all('div', class_='clear'): clear.decompose()
             desc = corrigir_html_descricao(tag_desc, "https://www.terabyteshop.com.br")
-            print("  -> [Terabyte] Descrição OK")
 
-        # 4. IMAGEM
-        tag_img = soup.select_one("img.zoomImg") or soup.select_one("#carousel-product-images img") or soup.select_one("div.product-image img")
+        tag_img = soup.select_one("img.zoomImg") or soup.select_one("#carousel-product-images img")
         if tag_img: img = tag_img.get('src')
 
-    except Exception as e:
-        print(f"  -> [Terabyte] Erro: {e}")
-        traceback.print_exc() # Mostra onde o erro aconteceu
-
+    except Exception as e: print(f"  -> [Terabyte] Erro: {e}")
     return nome, preco, img, desc
 
 # --- SELENIUM ---
@@ -312,81 +272,66 @@ def get_selenium_soup(url, loja):
 
         driver.get(url)
         
-        # Espera dinâmica baseada na loja
-        wait = WebDriverWait(driver, 12) # Aumentado para 12s
-        if loja == "Terabyte":
-            # Espera o H1 aparecer, pois ele é essencial
-            wait.until(EC.presence_of_element_located((By.TAG_NAME, "h1")))
-        elif loja == "Pichau":
-             wait.until(EC.presence_of_element_located((By.TAG_NAME, "h1")))
+        # Espera a página carregar (H1 é crucial)
+        WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, "h1")))
+        time.sleep(3) 
         
-        time.sleep(2) # Pequena pausa extra para scripts JS terminarem
-        
-        soup = BeautifulSoup(driver.page_source, 'lxml')
-        return soup
+        return BeautifulSoup(driver.page_source, 'lxml')
 
     except Exception as e:
-        print(f"  -> [Selenium] Erro ao carregar {loja}: {e}")
+        print(f"  -> [Selenium] Erro em {loja}: {e}")
         return None
     finally:
         if driver: driver.quit()
 
-# --- MAIN ---
+# --- LOOP PRINCIPAL ---
 def buscar_dados_loja(url, loja):
     print(f"  Acessando {loja}...")
     if loja == "Kabum":
         try:
             resp = s.get(url, timeout=15)
-            if resp.status_code == 200:
-                return buscar_dados_kabum(url, BeautifulSoup(resp.content, 'lxml'))
-        except Exception as e: print(f"Erro req Kabum: {e}")
-    
+            if resp.status_code == 200: return buscar_dados_kabum(url, BeautifulSoup(resp.content, 'lxml'))
+        except: pass
     elif loja in ["Pichau", "Terabyte"]:
         soup = get_selenium_soup(url, loja)
         if soup:
             if loja == "Pichau": return buscar_dados_pichau(url, soup)
             if loja == "Terabyte": return buscar_dados_terabyte(url, soup)
-    
     return None, None, None, None
 
-print(f"--- INICIANDO MONITOR DE PREÇOS (v11.0 - Fix Geral) ---")
+print(f"--- INICIANDO MONITOR DE PREÇOS (v11.5 - Pichau Full + Lista Completa) ---")
 resultados = []
 now = datetime.now()
 
 for item in LISTA_DE_PRODUTOS:
     base = item["nome_base"].strip()
-    cat = item["categoria"].strip()
     print(f"\n>>> Produto: {base}")
     
     for loja, url in item["urls"].items():
         if not url: continue
-        
         nome, preco, img, desc = buscar_dados_loja(url, loja)
         
-        # Só salva se tiver Nome e Preço (mesmo que preço seja 0.0/Esgotado)
         if nome and preco is not None:
             resultados.append({
-                "timestamp": now,
-                "produto_base": base,
-                "categoria": cat,
-                "nome_completo_raspado": nome,
-                "preco": preco,
-                "imagem_url": img or "",
-                "loja": loja,
-                "url": url,
-                "descricao": desc or ""
+                "timestamp": now, "produto_base": base, "categoria": item["categoria"],
+                "nome_completo_raspado": nome, "preco": preco, "imagem_url": img or "",
+                "loja": loja, "url": url, "descricao": desc or ""
             })
-            print(f"  -> SUCESSO: {loja} salvo na lista.")
+            print(f"  -> SUCESSO: {loja} salvo.")
         else:
-            print(f"  -> FALHA: {loja} ignorado (Faltou Nome ou Preço).")
+            print(f"  -> FALHA: {loja} não coletado.")
             
     time.sleep(2)
 
 if resultados:
     try:
         df = pd.DataFrame(resultados)
+        # Garante ordem das colunas
         cols = ["timestamp", "produto_base", "categoria", "nome_completo_raspado", "preco", "imagem_url", "loja", "url", "descricao"]
-        df = df.reindex(columns=cols)
+        # Preenche colunas faltantes
+        for col in cols:
+            if col not in df.columns: df[col] = ""
+        df = df[cols]
         
         db_url = os.environ.get('DATABASE_URL')
         if db_url and db_url.startswith("postgres://"):
@@ -394,8 +339,6 @@ if resultados:
             
         engine = create_engine(db_url)
         df.to_sql('precos', con=engine, if_exists='append', index=False)
-        print(f"\n=== BANCO DE DADOS ATUALIZADO: {len(df)} registros novos ===")
-    except Exception as e:
-        print(f"Erro SQL: {e}")
-else:
-    print("\nNenhum dado coletado.")
+        print(f"\n=== DB ATUALIZADO: {len(df)} registros ===")
+    except Exception as e: print(f"Erro SQL: {e}")
+else: print("\nNenhum dado coletado.")
