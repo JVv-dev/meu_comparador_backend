@@ -11,6 +11,7 @@ import numpy as np
 app = Flask(__name__)
 CORS(app)
 
+
 def get_dados_do_db():
     try:
         DATABASE_URL = os.environ.get('DATABASE_URL')
@@ -176,6 +177,29 @@ def get_single_product(product_base_name):
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+    
+@app.route('/api/coupons', methods=['GET'])
+def get_coupons():
+    """Retorna a lista de cupons ativos."""
+    try:
+        DATABASE_URL = os.environ.get('DATABASE_URL')
+        if not DATABASE_URL: return jsonify([])
+        
+        if DATABASE_URL.startswith("postgres://"):
+            DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+            
+        engine = create_engine(DATABASE_URL)
+        
+        # Busca apenas cupons recentes (opcional, mas a tabela é limpa no scraper)
+        df = pd.read_sql("SELECT * FROM cupons ORDER BY id DESC", engine)
+        
+        if df.empty: return jsonify([])
+        
+        return jsonify(df.to_dict(orient='records'))
+        
+    except Exception as e:
+        print(f"Erro ao buscar cupons: {e}")
+        return jsonify({"error": "Erro ao buscar cupons"}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5001))
