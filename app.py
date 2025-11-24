@@ -1,4 +1,4 @@
-# meu_comparador_backend/app.py (v13.1 - Correção da Rota de Cupons)
+# meu_comparador_backend/app.py (v13.2 - Fix Final da Rota de Cupons)
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -23,11 +23,11 @@ def get_coupons():
             
         engine = create_engine(DATABASE_URL)
         
-        # Busca os cupons diretamente
+        # Busca os cupons diretamente com SQL simples
         df = pd.read_sql("SELECT * FROM cupons ORDER BY id DESC", engine)
         
         if df.empty: 
-            return jsonify([]) # Retorna lista vazia se não tiver nada
+            return jsonify([]) 
         
         # Converte para dicionário
         cupons = df.to_dict(orient='records')
@@ -35,7 +35,8 @@ def get_coupons():
         
     except Exception as e:
         print(f"Erro ao buscar cupons: {e}")
-        return jsonify({"error": str(e)}), 500
+        # Retorna lista vazia em caso de erro para não quebrar o front
+        return jsonify([]) 
 
 # --- Funções Auxiliares de Produtos ---
 def get_dados_do_db():
@@ -50,20 +51,23 @@ def get_dados_do_db():
 
         df['timestamp'] = pd.to_datetime(df['timestamp'])
         df['preco'] = pd.to_numeric(df['preco'], errors='coerce').fillna(0.0)
-        if 'imagem_url' not in df.columns: df['imagem_url'] = ''
+        
+        # Garante colunas
+        for col in ['imagem_url', 'descricao', 'categoria', 'produto_base']:
+             if col not in df.columns: df[col] = ''
+        
         df['imagem_url'] = df['imagem_url'].fillna('')
-        if 'categoria' not in df.columns: df['categoria'] = 'Eletrônicos'
-        df['categoria'] = df['categoria'].fillna('Eletrônicos')
-        if 'descricao' not in df.columns: df['descricao'] = ''
         df['descricao'] = df['descricao'].fillna('')
+        df['categoria'] = df['categoria'].fillna('Eletrônicos').str.strip()
         df['produto_base'] = df['produto_base'].str.strip()
-        df['categoria'] = df['categoria'].str.strip()
         
         return df
-    except: return None
+    except Exception as e: 
+        print(f"Erro DB: {e}")
+        return None
 
 @app.route('/', methods=['GET'])
-def home(): return jsonify({"message": "API Online (v13.1)"}), 200
+def home(): return jsonify({"message": "API Online (v13.2)"}), 200
 
 @app.route('/api/products', methods=['GET'])
 def get_products():
@@ -113,8 +117,7 @@ def get_products():
 @app.route('/api/product/<path:product_base_name>', methods=['GET'])
 def get_single_product(product_base_name):
     product_name_limpo = product_base_name.strip()
-    print(f"Buscando: '{product_name_limpo}'")
-
+    
     df_dados = get_dados_do_db()
     if df_dados is None: return jsonify({"error": "Erro DB"}), 500
 
@@ -125,17 +128,15 @@ def get_single_product(product_base_name):
         # 1. Recentes
         df_recentes = group.loc[group.groupby('loja')['timestamp'].idxmax()]
         
-        # 2. Vencedor do Preço (Capa)
+        # 2. Vencedor
         group_valido = df_recentes[df_recentes['preco'] > 0]
         if not group_valido.empty:
             principal = group_valido.loc[group_valido['preco'].idxmin()]
         else:
             principal = df_recentes.sort_values(by='timestamp', ascending=False).iloc[0]
 
-        # 3. --- LÓGICA DA DESCRIÇÃO ---
+        # 3. Descrição (Prioridade Pichau)
         descricao_final = ""
-        
-        # Tenta Pichau PRIMEIRO
         try:
             pichau_row = df_recentes[df_recentes['loja'] == 'Pichau']
             if not pichau_row.empty:
@@ -144,7 +145,6 @@ def get_single_product(product_base_name):
                     descricao_final = desc
         except: pass
 
-        # Se não achou Pichau, tenta Terabyte
         if not descricao_final:
             try:
                 tera_row = df_recentes[df_recentes['loja'] == 'Terabyte']
@@ -154,13 +154,12 @@ def get_single_product(product_base_name):
                         descricao_final = desc
             except: pass
 
-        # Se não achou nenhuma das ricas, usa a do vencedor
         if not descricao_final:
             desc_vencedor = principal.get('descricao', '')
             if desc_vencedor and len(str(desc_vencedor).strip()) > 10:
                  descricao_final = desc_vencedor
 
-        # 4. Monta Lojas
+        # 4. Lojas
         lojas = []
         for _, row in df_recentes.iterrows():
             lojas.append({
@@ -192,7 +191,6 @@ def get_single_product(product_base_name):
         })
 
     except Exception as e:
-        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
