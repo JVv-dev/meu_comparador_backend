@@ -373,4 +373,4 @@ if db_url:
             print(f"\n=== CUPONS ATUALIZADOS: {len(df_cupons)} registros ===")
         except Exception as e: print(f"Erro SQL Cupons: {e}")
 else:
-    print("ERRO: DATABASE_URL não configurada.")#TESTE
+    print("ERRO: DATABASE_URL não configurada.")
