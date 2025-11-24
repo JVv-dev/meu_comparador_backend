@@ -1,4 +1,4 @@
-# meu_comparador_backend/app.py (v12.1 - Prioridade Visual Pichau)
+# meu_comparador_backend/app.py (v13.1 - Correção da Rota de Cupons)
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -11,7 +11,33 @@ import numpy as np
 app = Flask(__name__)
 CORS(app)
 
+# --- ROTA DE CUPONS (CORRIGIDA) ---
+@app.route('/api/coupons', methods=['GET'])
+def get_coupons():
+    try:
+        DATABASE_URL = os.environ.get('DATABASE_URL')
+        if not DATABASE_URL: return jsonify([])
+        
+        if DATABASE_URL.startswith("postgres://"):
+            DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+            
+        engine = create_engine(DATABASE_URL)
+        
+        # Busca os cupons diretamente
+        df = pd.read_sql("SELECT * FROM cupons ORDER BY id DESC", engine)
+        
+        if df.empty: 
+            return jsonify([]) # Retorna lista vazia se não tiver nada
+        
+        # Converte para dicionário
+        cupons = df.to_dict(orient='records')
+        return jsonify(cupons)
+        
+    except Exception as e:
+        print(f"Erro ao buscar cupons: {e}")
+        return jsonify({"error": str(e)}), 500
 
+# --- Funções Auxiliares de Produtos ---
 def get_dados_do_db():
     try:
         DATABASE_URL = os.environ.get('DATABASE_URL')
@@ -37,7 +63,7 @@ def get_dados_do_db():
     except: return None
 
 @app.route('/', methods=['GET'])
-def home(): return jsonify({"message": "API Online"}), 200
+def home(): return jsonify({"message": "API Online (v13.1)"}), 200
 
 @app.route('/api/products', methods=['GET'])
 def get_products():
@@ -83,7 +109,7 @@ def get_products():
     except Exception as e: return jsonify({"error": str(e)}), 500
     return jsonify(produtos_formatados)
 
-# --- ROTA DE PRODUTO ÚNICO (v12.2 - Sem Fallback Kabum) ---
+# --- ROTA DE PRODUTO ÚNICO ---
 @app.route('/api/product/<path:product_base_name>', methods=['GET'])
 def get_single_product(product_base_name):
     product_name_limpo = product_base_name.strip()
@@ -109,14 +135,13 @@ def get_single_product(product_base_name):
         # 3. --- LÓGICA DA DESCRIÇÃO ---
         descricao_final = ""
         
-        # Tenta Pichau PRIMEIRO (Prioridade Máxima)
+        # Tenta Pichau PRIMEIRO
         try:
             pichau_row = df_recentes[df_recentes['loja'] == 'Pichau']
             if not pichau_row.empty:
                 desc = pichau_row.iloc[0]['descricao']
                 if desc and len(str(desc).strip()) > 10:
                     descricao_final = desc
-                    print("  -> [Descrição] Usando Pichau.")
         except: pass
 
         # Se não achou Pichau, tenta Terabyte
@@ -127,21 +152,13 @@ def get_single_product(product_base_name):
                     desc = tera_row.iloc[0]['descricao']
                     if desc and len(str(desc).strip()) > 10:
                         descricao_final = desc
-                        print("  -> [Descrição] Usando Terabyte.")
             except: pass
 
-        # Se não achou nenhuma das ricas, usa a do vencedor do preço (SE NÃO FOR KABUM)
+        # Se não achou nenhuma das ricas, usa a do vencedor
         if not descricao_final:
-            loja_vencedora = principal['loja']
-            # Se a Kabum for a vencedora, a descrição dela virá vazia do banco (pois paramos de coletar)
-            # ou será ignorada se tiver dados antigos.
             desc_vencedor = principal.get('descricao', '')
             if desc_vencedor and len(str(desc_vencedor).strip()) > 10:
                  descricao_final = desc_vencedor
-                 print(f"  -> [Descrição] Usando Vencedor ({loja_vencedora}).")
-
-        # REMOVIDO: Fallback para Kabum (não existe mais)
-        # ------------------------------------------------
 
         # 4. Monta Lojas
         lojas = []
@@ -177,29 +194,6 @@ def get_single_product(product_base_name):
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
-    
-@app.route('/api/coupons', methods=['GET'])
-def get_coupons():
-    """Retorna a lista de cupons ativos."""
-    try:
-        DATABASE_URL = os.environ.get('DATABASE_URL')
-        if not DATABASE_URL: return jsonify([])
-        
-        if DATABASE_URL.startswith("postgres://"):
-            DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
-            
-        engine = create_engine(DATABASE_URL)
-        
-        # Busca apenas cupons recentes (opcional, mas a tabela é limpa no scraper)
-        df = pd.read_sql("SELECT * FROM cupons ORDER BY id DESC", engine)
-        
-        if df.empty: return jsonify([])
-        
-        return jsonify(df.to_dict(orient='records'))
-        
-    except Exception as e:
-        print(f"Erro ao buscar cupons: {e}")
-        return jsonify({"error": "Erro ao buscar cupons"}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5001))
