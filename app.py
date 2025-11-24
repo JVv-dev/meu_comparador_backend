@@ -1,4 +1,4 @@
-# meu_comparador_backend/app.py (v13.3 - Final e Corrigido)
+# meu_comparador_backend/app.py (v13.4 - Rota de Cupons Validada)
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -13,7 +13,7 @@ CORS(app)
 
 # --- FUNÇÕES AUXILIARES ---
 def get_db_engine():
-    """Cria e retorna a engine do banco de dados."""
+    """Cria a conexão com o banco de dados."""
     try:
         DATABASE_URL = os.environ.get('DATABASE_URL')
         if not DATABASE_URL: return None
@@ -23,7 +23,7 @@ def get_db_engine():
     except: return None
 
 def get_dados_do_db():
-    """Busca dados da tabela de preços."""
+    """Busca os produtos do banco."""
     try:
         engine = get_db_engine()
         if not engine: return None
@@ -31,7 +31,6 @@ def get_dados_do_db():
         df = pd.read_sql("SELECT * FROM precos", engine)
         if df.empty: return None
 
-        # Tratamento de tipos e nulos
         df['timestamp'] = pd.to_datetime(df['timestamp'])
         df['preco'] = pd.to_numeric(df['preco'], errors='coerce').fillna(0.0)
         
@@ -54,27 +53,32 @@ def get_dados_do_db():
 def home():
     return jsonify({"message": "API V3.0 Online (Com Cupons)"}), 200
 
+# --- ROTA DE CUPONS (CRUCIAL) ---
 @app.route('/api/coupons', methods=['GET'])
 def get_coupons():
-    """Retorna a lista de cupons ativos."""
+    """Retorna a lista de cupons ativos no banco."""
     try:
         engine = get_db_engine()
-        if not engine: return jsonify([])
+        if not engine: 
+            print("Erro: Sem conexão com o banco para buscar cupons.")
+            return jsonify([])
         
-        # Busca os cupons diretamente
+        # Busca os cupons
         df = pd.read_sql("SELECT * FROM cupons ORDER BY id DESC", engine)
         
         if df.empty: 
-            return jsonify([]) 
+            return jsonify([]) # Lista vazia se não houver cupons
         
-        # Converte para dicionário
+        # Converte para lista de dicionários
         cupons = df.to_dict(orient='records')
         return jsonify(cupons)
         
     except Exception as e:
         print(f"Erro ao buscar cupons: {e}")
-        return jsonify({"error": str(e)}), 500
+        # Retorna lista vazia em vez de erro 500 para não quebrar o front
+        return jsonify([])
 
+# --- ROTA DE PRODUTOS (LISTAGEM) ---
 @app.route('/api/products', methods=['GET'])
 def get_products():
     df_dados = get_dados_do_db()
@@ -119,6 +123,7 @@ def get_products():
     except Exception as e: return jsonify({"error": str(e)}), 500
     return jsonify(produtos_formatados)
 
+# --- ROTA DE PRODUTO ÚNICO (DETALHES) ---
 @app.route('/api/product/<path:product_base_name>', methods=['GET'])
 def get_single_product(product_base_name):
     product_name_limpo = product_base_name.strip()
@@ -138,7 +143,7 @@ def get_single_product(product_base_name):
         else:
             principal = df_recentes.sort_values(by='timestamp', ascending=False).iloc[0]
 
-        # Lógica de Descrição (Prioridade Pichau)
+        # Lógica de Descrição (Pichau > Terabyte > Vencedor)
         descricao_final = ""
         try:
             pichau_row = df_recentes[df_recentes['loja'] == 'Pichau']
